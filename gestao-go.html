@@ -390,6 +390,7 @@ nav button[hidden]{display:none}
 .comp textarea{flex:1;min-height:44px;max-height:100px;resize:none}
 .pend{display:flex;align-items:center;gap:8px;margin-top:8px}
 .pend img{max-height:70px;border-radius:8px}
+.tc>img.phimg{width:100%;height:110px;object-fit:cover;border-radius:10px;image-rendering:auto;cursor:zoom-in;background:#E3EBF1}
 </style>
 </head>
 <body>
@@ -1449,7 +1450,7 @@ function tProfile(){
 }
 function tCard(it,mine){
   var k=it.kind==='want'?'want':'offer';
-  return '<div class="tc '+k+'"><span class="tk">'+(k==='want'?'🔴 Procura':'🔵 Oferece')+'</span>'+img(it)+'<div class="nm">'+esc(it.name)+'</div><div class="dx">#'+('000'+it.dex).slice(-3)+'</div><div class="bd">'+badges({sh:it.sh,t:it.t||'',fk:it.fk||''})+'</div>'+(it.note?'<div class="nt">'+esc(it.note)+'</div>':'')+
+  return '<div class="tc '+k+'" data-cid="'+it.id+'"><span class="tk">'+(k==='want'?'🔴 Procura':'🔵 Oferece')+'</span>'+img(it)+'<div class="nm">'+esc(it.name)+'</div><div class="dx">#'+('000'+it.dex).slice(-3)+'</div><div class="bd">'+badges({sh:it.sh,t:it.t||'',fk:it.fk||''})+'</div>'+(it.note?'<div class="nt">'+esc(it.note)+'</div>':'')+
     '<div class="row" style="justify-content:center;margin-top:6px;gap:4px">'+(it.ph?'<button type="button" class="btn o s" data-t="photo" data-tid="'+it.id+'">📷 Foto</button>':'')+
     (mine?'<button type="button" class="btn r s" data-t="delitem" data-tid="'+it.id+'" aria-label="Remover">🗑</button>':'<button type="button" class="btn o s" data-t="repitem" data-tid="'+it.id+'" aria-label="Denunciar">🚩</button>')+'</div></div>';
 }
@@ -1468,7 +1469,22 @@ function tProfileDraw(){
     h+='<div class="bar" style="margin-top:14px"><h2 style="font-size:18px">'+s[1]+' ('+l.length+')</h2>'+(mine?'<button class="btn y s" type="button" data-t="add" data-tk="'+s[0]+'">＋ Adicionar</button>':'')+'</div>'+
       (l.length?'<div class="tgrid">'+l.map(function(i){return tCard(i,mine);}).join('')+'</div>':'<div class="empty">Nada por aqui.</div>');
   });
-  b.innerHTML=h;
+  b.innerHTML=h;tLoadPhotos();
+}
+var TPC={};
+function tShowPh(id,src){
+  var c=document.querySelector('.tc[data-cid="'+id+'"]');if(!c)return;
+  var im=c.querySelector('img');if(!im)return;
+  im.removeAttribute('data-fb');im.removeAttribute('loading');im.className='phimg';im.alt='Foto original';im.setAttribute('data-t','zoom');im.src=src;
+}
+function tLoadPhotos(){
+  var ids=T.pi.filter(function(i){return i.ph;}).map(function(i){return i.id;}),u=T.user;
+  (function next(){
+    if(!ids.length||T.s!=='profile'||T.user!==u)return;
+    var id=ids.shift();
+    if(TPC[id]){tShowPh(id,TPC[id]);next();return;}
+    fbDb.collection('tradePhotos').doc(id).get().then(function(x){var im=x.exists?x.data().img:null;if(safeImg(im)){TPC[id]=im;tShowPh(id,im);}}).catch(function(){}).then(next);
+  })();
 }
 /* ---- Código de amizade ---- */
 function tCodeModal(){
