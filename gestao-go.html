@@ -47,6 +47,7 @@ service cloud.firestore {
     function profileAfter() { return getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
 
     function active() { return hasProfile() && notExpired(); }
+    function redeemBase(r) { return (r.get('key', null) != null && r.get('expiresAt', request.time) > request.time) ? r.get('expiresAt', request.time) : request.time; }
 
     // Perfil de cada pessoa (usuario + papel). Sem perfil = sem acesso a nada.
     match /users/{uid} {
@@ -89,8 +90,19 @@ service cloud.firestore {
             && request.resource.data.expiresAt <= request.time + duration.value(7, 'd') + duration.value(1, 'h'))
         );
       // admin renova o prazo de acesso de um usuario (so o campo expiresAt)
-      allow update: if isAdmin() && resource.data.role != 'admin'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['expiresAt']);
+      allow update: if (isAdmin() && resource.data.role != 'admin'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['expiresAt']))
+        ||
+        // usuario ativa uma chave de cadastro na propria conta (queima a chave no mesmo envio)
+        (signedIn() && request.auth.uid == uid && resource.data.role == 'user'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['key','expiresAt'])
+        && 'key' in request.resource.data
+        && keyBurned(request.resource.data.key)
+        && keyBefore(request.resource.data.key).type == 'register'
+        && ((keyBefore(request.resource.data.key).days == 0 && !('expiresAt' in request.resource.data))
+            || (keyBefore(request.resource.data.key).days > 0
+                && request.resource.data.expiresAt is timestamp
+                && request.resource.data.expiresAt <= redeemBase(resource.data) + duration.value(keyBefore(request.resource.data.key).days, 'd') + duration.value(1, 'h'))));
       allow delete: if isAdmin() && resource.data.role != 'admin';
     }
 
@@ -554,6 +566,7 @@ function errMsg(m){
   if(/x-exists|email-already-in-use/i.test(m))return 'Esse usuário já existe ou a senha não confere.';
   if(/x-expired/i.test(m))return 'Seu acesso expirou. Peça uma nova chave ao administrador.';
   if(/x-nouser/i.test(m))return 'Usuário não encontrado.';
+  if(/x-already/i.test(m))return 'Você já tem acesso permanente, não precisa de outra Key.';
   if(/x-badkey/i.test(m))return 'Chave inválida, já usada ou de outro usuário.';
   if(/x-noprofile/i.test(m))return 'Sua conta não está liberada. Use "Criar conta" ou "Esqueci minha senha" com a chave do administrador.';
   if(/permission-denied|insufficient/i.test(m))return 'Sem permissão. Confira a chave e se as regras do Firestore foram publicadas.';
@@ -744,8 +757,37 @@ function enforce(){
   }
   if((D.sel||[]).length!==s.length){D.sel=s;save();}
 }
+function redeemBox(){
+  if(!logged()||isAdm())return '';
+  return '<div style="margin:14px 0 4px;padding:12px;border-radius:12px;background:#EAF6EE"><p style="margin:0 0 8px"><b>🔑 Já tem uma Key?</b></p><input class="in" id="rkIn" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" autocapitalize="characters" autocomplete="off" maxlength="30"><div class="row" style="margin-top:8px"><button class="btn y" id="rkGo" type="button">Ativar Key</button></div></div>';
+}
+function openRedeem(){$('mdBox').innerHTML='<h2>🔑 Ativar Key</h2><p style="color:#5D6B82">Digite a Key que o administrador te passou. Ela é somada à sua conta atual, sem perder nenhum dado.</p>'+redeemBox()+'<div class="row" style="margin-top:10px"><button class="btn o" id="mNo" type="button">Fechar</button></div>';$('md').className='modal on';}
+var RKLOCK=false;
+function doRedeem(){
+  var el=$('rkIn');if(!el)return;
+  var k=normKey(el.value);
+  if(k.length<10){toast('Digite a Key completa');return;}
+  if(!logged()||!PROFILE||!A.session){toast('Entre na sua conta primeiro');return;}
+  if(RKLOCK)return;RKLOCK=true;toast('Ativando…');
+  var uid=A.session.uid,kr=fbDb.collection('keys').doc(k);
+  ensure().then(function(){return kr.get();}).then(function(ks){
+    var d=ks.exists?ks.data():null;
+    if(!d||d.used||d.type!=='register')throw {code:'x-badkey'};
+    var cur=expDate(PROFILE),permanent=!!PROFILE.key&&!cur&&keyActive(PROFILE);
+    if(permanent)throw {code:'x-already'};
+    var upd={key:k};
+    if(d.days>0){var base=(PROFILE.key&&cur&&cur.getTime()>Date.now())?cur.getTime():Date.now();upd.expiresAt=firebase.firestore.Timestamp.fromDate(new Date(base+d.days*864e5));}
+    else upd.expiresAt=firebase.firestore.FieldValue.delete();
+    var b=fbDb.batch();
+    b.update(kr,{used:true,usedBy:uid,usedByName:UN||A.owner,usedAt:new Date().toISOString()});
+    b.update(fbDb.collection('users').doc(uid),upd);
+    return b.commit();
+  }).then(function(){return loadProfile(uid);}).then(function(){
+    setLim();enforce();$('md').className='modal';toast('Key ativada! 🎉');draw();
+  }).catch(function(e){toast(errMsg((e&&(e.code||e.message))||'erro'));}).then(function(){RKLOCK=false;},function(){RKLOCK=false;});
+}
 function upsellH(why){
-  return '<h2>🔑 Limite de '+FREE_ACC+' contas</h2><p style="color:#5D6B82">'+why+'</p><p style="color:#5D6B82">Com uma <b>Key</b> você libera mais contas. Quando a Key terminar, todas as contas ficam bloqueadas e você escolhe '+FREE_ACC+' para continuar usando. Seus dados nunca são apagados.</p><div class="row"><button class="btn y" id="admDm" type="button">💬 Falar com o admin para comprar Key</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
+  return '<h2>🔑 Limite de '+FREE_ACC+' contas</h2><p style="color:#5D6B82">'+why+'</p><p style="color:#5D6B82">Com uma <b>Key</b> você libera mais contas. Quando a Key terminar, todas as contas ficam bloqueadas e você escolhe '+FREE_ACC+' para continuar usando. Seus dados nunca são apagados.</p>'+redeemBox()+'<div class="row" style="margin-top:10px"><button class="btn y" id="admDm" type="button">💬 Falar com o admin para comprar Key</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
 }
 function openUpsell(why){$('mdBox').innerHTML=upsellH(why);$('md').className='modal on';}
 function pickH(){
@@ -958,7 +1000,7 @@ function openAuthModal(){
     $('mdBox').innerHTML='<h2>Login</h2><p style="color:#5D6B82">O login ainda não está ativado neste arquivo. Para ativar, crie um projeto gratuito no Firebase e cole o firebaseConfig no começo do script. O passo a passo está nos comentários no topo do arquivo HTML.</p><div class="row"><button class="btn o" id="mNo" type="button">Fechar</button></div>';
   }else if(logged()){
     var st=SYNC==='busy'?'⏳ sincronizando…':SYNC==='err'?'⚠️ erro ao sincronizar (suas alterações ficam neste aparelho até conseguir)'+(SYNCERR?'<br><small style="color:#D7263D">Detalhe: '+esc(SYNCERR)+'</small>':''):A.dirty?'⏳ alterações pendentes':'☁️ tudo sincronizado';
-    $('mdBox').innerHTML='<h2>Sua conta</h2><p style="color:#5D6B82">Conectado como <b>'+esc(A.owner)+'</b>'+(isAdm()?' <span class="badge a">Admin</span>':'')+'. Suas contas ficam salvas na nuvem e aparecem em qualquer aparelho em que você entrar.</p>'+accessHtml()+'<p>'+st+'</p><div class="row"><button class="btn y" id="syncNow" type="button">Sincronizar agora</button><button class="btn o" id="pwChg" type="button">Alterar senha</button>'+(window.pwaCan&&window.pwaCan()?'<button class="btn y" id="pwaInst" type="button">📲 Instalar app</button>':'')+'<button class="btn r" id="lgOut" type="button">Sair</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
+    $('mdBox').innerHTML='<h2>Sua conta</h2><p style="color:#5D6B82">Conectado como <b>'+esc(A.owner)+'</b>'+(isAdm()?' <span class="badge a">Admin</span>':'')+'. Suas contas ficam salvas na nuvem e aparecem em qualquer aparelho em que você entrar.</p>'+accessHtml()+'<p>'+st+'</p><div class="row"><button class="btn y" id="syncNow" type="button">Sincronizar agora</button><button class="btn o" id="pwChg" type="button">Alterar senha</button>'+(isAdm()?'':'<button class="btn y" id="rkOpen" type="button">🔑 Ativar Key</button>')+(window.pwaCan&&window.pwaCan()?'<button class="btn y" id="pwaInst" type="button">📲 Instalar app</button>':'')+'<button class="btn r" id="lgOut" type="button">Sair</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
   }else{showGate('in');return;}
   $('md').className='modal on';
 }
@@ -2086,6 +2128,8 @@ document.addEventListener('click',function(e){
   if(b.id==='lgGoUp'){showGate('up');return;}
   if(b.id==='lgGoRec'){showGate('rec');return;}
   if(b.id==='lgBack'){showGate('in');return;}
+  if(b.id==='rkOpen'){openRedeem();return;}
+  if(b.id==='rkGo'){doRedeem();return;}
   if(b.id==='pwChg'){openPwModal();return;}
   if(b.id==='admDm'){$('md').className='modal';var tb=document.querySelector('[data-tab="trade"]');if(tb)tb.click();setTimeout(function(){tOpenDm(ADMIN_USER);},50);return;}
   if(b.id==='pwaInst'){$('md').className='modal';window.pwaInstall();return;}
