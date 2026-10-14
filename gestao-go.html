@@ -488,7 +488,7 @@ function seedMons(){
 }
 function defaults(){
   var a=[];
-  for(var i=0;i<2;i++) a.push({id:'a'+(i+1),name:i===0?'Principal':'Conta '+(i+1),nick:'',code:'',note:'',color:COLORS[i],mons:[]});
+  for(var i=0;i<1;i++) a.push({id:'a'+(i+1),name:i===0?'Principal':'Conta '+(i+1),nick:'',code:'',note:'',color:COLORS[i],mons:[]});
   return {v:3,accounts:a,sel:[]};
 }
 function fkName(n){var r=(n||'').match(/ de (Alola|Hisui|Galar|Paldea)$/);return r?r[1].toLowerCase():'';}
@@ -663,6 +663,7 @@ function afterLogin(u){
       else if(A.owner===u&&!A.dirty)useCloud=true;
       else useCloud=confirm('Encontrei dados na nuvem ('+cloudN+' Pokémon) e também neste aparelho ('+localN+').\n\nOK = usar os da nuvem (os deste aparelho ficam num backup interno)\nCancelar = enviar os deste aparelho para a nuvem (substitui a nuvem)');
     }
+    if(!(row&&row.data)&&A.owner!==u&&localN===0){D=defaults();try{localStorage.setItem(LS,JSON.stringify(D));}catch(e){}}
     A.owner=u;saveAuth();
     if(useCloud){try{localStorage.setItem('gestgo.bak.v1',JSON.stringify(D));}catch(e){}applyCloud(row);setSync('ok');return row.legacy?pushCloud():null;}
     return pushCloud();
@@ -1443,7 +1444,7 @@ function drawWho(){
 function renderBkp(){
   $('v-bkp').innerHTML='<div class="panel"><h3>Salvar backup</h3><p>Sem login, seus dados ficam só neste navegador; com login, também ficam na nuvem. O backup guarda a lista, mas não as fotos.</p><div class="row"><button class="btn y" id="bkDown" type="button">Baixar backup (.json)</button><button class="btn o" id="bkCopy" type="button">Copiar como texto</button></div></div>'+
    '<div class="panel"><h3>Restaurar backup</h3><p>Escolha o arquivo ou cole o texto. Isso substitui tudo que está no app agora.</p><div class="row"><button class="btn o" id="bkFile" type="button">Escolher arquivo</button></div><textarea class="in" id="bkTxt" placeholder="Cole aqui o backup" style="margin-top:8px"></textarea><div class="row" style="margin-top:8px"><button class="btn" id="bkImp" type="button">Restaurar do texto</button></div></div>'+
-   (D.accounts[0].mons.length?'':'<div class="panel"><h3>Lista inicial</h3><p>Carrega os 145 Pokémon Shine da conta Principal.</p><button class="btn y" id="bkSeed" type="button">Carregar lista inicial</button></div>')+'<div class="panel"><h3>Recomeçar</h3><p>Volta ao início: 2 contas vazias.</p><button class="btn r" id="bkReset" type="button">Apagar tudo e recomeçar</button></div><input type="file" id="bkIn" accept=".json,application/json" hidden>';
+   (D.accounts[0].mons.length?'':'<div class="panel"><h3>Lista inicial</h3><p>Carrega os 145 Pokémon Shine da conta Principal.</p><button class="btn y" id="bkSeed" type="button">Carregar lista inicial</button></div>')+'<div class="panel"><h3>Recomeçar</h3><p>Volta ao início: 1 conta vazia.</p><button class="btn r" id="bkReset" type="button">Apagar tudo e recomeçar</button></div><input type="file" id="bkIn" accept=".json,application/json" hidden>';
 }
 function importData(txt){
   try{var d=JSON.parse(txt); if(!d||!d.accounts||!d.accounts.length)throw 0;
