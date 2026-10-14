@@ -1021,6 +1021,7 @@ function renderHome(){
       '<div class="nums"><span class="pill">'+a.mons.length+' Pokémon</span><span class="pill y">✨ '+y+'</span>'+(p?'<span class="pill">❓ '+p+'</span>':'')+(s?'<span class="pill">🌑 '+s+'</span>':'')+(l?'<span class="pill">🍀 '+l+'</span>':'')+(mg?'<span class="pill">🧬 '+mg+'</span>':'')+(gx?'<span class="pill">🌋 '+gx+'</span>':'')+(dn?'<span class="pill">🔴 '+dn+'</span>':'')+'</div>'+
       '<div class="strip">'+(strip||'<span class="sb" style="font-size:12px;color:#5D6B82">Nenhum brilhante registrado</span>')+'</div></button>';
   });
+  h+='<button type="button" class="ac" data-newacc="1" style="--c:#9AA5B1;border-style:dashed;display:flex;align-items:center;justify-content:center;min-height:110px"><div class="n">➕ Adicionar conta</div></button>';
   $('v-home').innerHTML=h+'</div>';
 }
 
