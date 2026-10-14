@@ -9,32 +9,135 @@
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
 <!--
   ============================================================
-  COMO ATIVAR LOGIN + NUVEM (Firebase gratuito)
+  LOGIN + NUVEM (Firebase) COM PAINEL ADMIN E CADASTRO POR CHAVE
   ============================================================
-  Sem isso o app funciona normalmente, mas so neste aparelho (sem login).
-  Com isso: cada pessoa cria o proprio usuario e senha e ve so as proprias contas,
-  em qualquer aparelho, e o que muda em um aparece nos outros sozinho.
-  As fotos ficam guardadas so no aparelho onde foram enviadas.
+  - Authentication > Metodo de login > E-mail/senha: ATIVADO (ja esta).
+  - Firestore Database > aba Regras: apague tudo, cole as regras abaixo e Publique.
+    (sem publicar as regras novas o login e o painel NAO funcionam)
+  - Authentication > Configuracoes > Dominios autorizados: inclua o dominio onde o app estiver hospedado.
+  - PRIMEIRO ACESSO DO ADMIN: logo depois de publicar as regras, abra o app, toque em
+    "Criar conta", digite o usuario davidkannedy e a sua senha e deixe a CHAVE EM BRANCO.
+    So o admin pode fazer isso, e so uma vez (depois o nome fica reservado).
+  - A senha do admin NAO fica escrita neste arquivo.
+  - Para mudar o nome do admin, troque ADMIN_USER no script e 'davidkannedy' nas regras.
 
-  1) console.firebase.google.com > Adicionar projeto (pode desligar o Google Analytics)
-  2) Build > Authentication > Comecar > Metodo de login > E-mail/senha: ATIVE
-     (o app usa o usuario como login, nao existe e-mail de verdade).
-  3) Build > Firestore Database > Criar banco de dados (modo de producao).
-     Aba "Regras": cole as regras abaixo e clique em Publicar.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
 
-     rules_version = '2';
-     service cloud.firestore {
-       match /databases/{database}/documents {
-         match /gestao/{uid} {
-           allow read, write: if request.auth != null && request.auth.uid == uid;
-         }
-       }
-     }
+    function signedIn() { return request.auth != null; }
+    function hasProfile() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function me() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isAdmin() { return hasProfile() && me().role == 'admin'; }
+    function validName(u) { return u is string && u.size() >= 3 && u.size() <= 20 && u.matches('[a-z0-9._-]+'); }
+    function keyBefore(k) { return get(/databases/$(database)/documents/keys/$(k)).data; }
+    function keyAfter(k) { return getAfter(/databases/$(database)/documents/keys/$(k)).data; }
+    function keyBurned(k) { return keyBefore(k).used == false && keyAfter(k).used == true && keyAfter(k).usedBy == request.auth.uid; }
+    function notExpired() { return !('expiresAt' in me()) || me().expiresAt > request.time; }
+    function profileAfter() { return getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
 
-  4) Engrenagem > Configuracoes do projeto > Seus apps > Web (</>) > registrar app.
-     Copie o objeto firebaseConfig e cole em FB_CONFIG, no comeco do script abaixo.
-  5) Se hospedar fora do Firebase Hosting: Authentication > Configuracoes >
-     Dominios autorizados > adicione o dominio do seu site.
+    // Perfil de cada pessoa (usuario + papel). Sem perfil = sem acesso a nada.
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['username','role','key','createdAt','expiresAt'])
+        && validName(request.resource.data.username)
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username)).data.uid == request.auth.uid
+        && (
+          // primeiro acesso do ADMIN (so vale enquanto o nome nao foi reivindicado)
+          (request.resource.data.role == 'admin'
+            && request.resource.data.username == 'davidkannedy'
+            && request.auth.token.email == 'davidkannedy@gestaogo.app'
+            && !exists(/databases/$(database)/documents/usernames/davidkannedy))
+          ||
+          // usuario comum: precisa de uma chave valida, queimada neste mesmo envio
+          (request.resource.data.role == 'user'
+            && request.resource.data.username != 'davidkannedy'
+            && 'key' in request.resource.data
+            && keyBurned(request.resource.data.key)
+            && (
+              // chave de cadastro: o prazo vem da chave (0 = permanente)
+              (keyBefore(request.resource.data.key).type == 'register'
+                && ((keyBefore(request.resource.data.key).days == 0 && !('expiresAt' in request.resource.data))
+                    || (keyBefore(request.resource.data.key).days > 0
+                        && request.resource.data.expiresAt is timestamp
+                        && request.resource.data.expiresAt <= request.time + duration.value(keyBefore(request.resource.data.key).days, 'd') + duration.value(1, 'h'))))
+              ||
+              // chave de recuperacao: mantem o prazo que a pessoa ja tinha
+              (keyBefore(request.resource.data.key).type == 'reset'
+                && keyBefore(request.resource.data.key).username == request.resource.data.username
+                && request.resource.data.get('expiresAt', null) == keyBefore(request.resource.data.key).get('expiresAt', null))
+            ))
+        );
+      // admin renova o prazo de acesso de um usuario (so o campo expiresAt)
+      allow update: if isAdmin() && resource.data.role != 'admin'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['expiresAt']);
+      allow delete: if isAdmin() && resource.data.role != 'admin';
+    }
+
+    // Reserva de nomes de usuario (e versao do login, usada na recuperacao de senha)
+    match /usernames/{u} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create: if signedIn() && validName(u)
+        && request.resource.data.keys().hasOnly(['uid','ver','deleted'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.ver == 0
+        && request.resource.data.deleted == false
+        && profileAfter().username == u;
+      allow update: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid','ver','deleted'])
+        && (
+          // admin exclui usuario
+          (isAdmin() && u != 'davidkannedy'
+            && resource.data.deleted == false
+            && request.resource.data.deleted == true
+            && request.resource.data.ver == resource.data.ver + 1)
+          ||
+          // nome liberado, reutilizado com chave de cadastro
+          (resource.data.deleted == true
+            && request.resource.data.deleted == false
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.ver == resource.data.ver
+            && profileAfter().username == u
+            && keyAfter(profileAfter().key).type == 'register')
+          ||
+          // recuperacao de senha com chave de recuperacao
+          (resource.data.deleted == false
+            && request.resource.data.deleted == false
+            && u != 'davidkannedy'
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.ver == resource.data.ver + 1
+            && profileAfter().username == u
+            && keyAfter(profileAfter().key).type == 'reset')
+        );
+    }
+
+    // Chaves de uso unico (so o admin cria e lista)
+    match /keys/{k} {
+      allow get: if signedIn();
+      allow list: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['type','username','days','expiresAt','used','usedBy','usedByName','usedAt','createdAt'])
+        && request.resource.data.used == false
+        && request.resource.data.type in ['register','reset']
+        && (request.resource.data.type == 'reset' || request.resource.data.days in [0, 7, 30]);
+      allow update: if signedIn()
+        && resource.data.used == false
+        && request.resource.data.used == true
+        && request.resource.data.usedBy == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['used','usedBy','usedByName','usedAt']);
+      allow delete: if isAdmin();
+    }
+
+    // Dados do app: cada pessoa so ve os proprios (o documento tem o nome do usuario)
+    match /gestao/{id} {
+      allow read: if signedIn() && (request.auth.uid == id || (hasProfile() && me().username == id && notExpired()));
+      allow write: if hasProfile() && me().username == id && notExpired();
+      allow delete: if isAdmin();
+    }
+  }
+}
 -->
 <style>
 :root{--bg:#EEF3F6;--ink:#16213A;--mut:#5D6B82;--line:#D3DDE6;--card:#fff;--yel:#FFC72C;--yel-d:#E0A800;--red:#D7263D;--teal:#138F82;--soft:#E3EBF1;--r:14px}
@@ -137,6 +240,14 @@ nav button[aria-selected=true]{color:var(--ink);box-shadow:inset 0 3px 0 var(--y
 #lbImg{max-width:100%;max-height:90vh;border-radius:12px;background:#fff}
 .lg{font-size:12px;color:var(--mut);margin:6px 0 0}
 .mon img.art,.who img.art,.strip img.art{image-rendering:auto}
+nav button[hidden]{display:none}
+.kbox{font:800 20px/1.3 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.04em;background:var(--soft);border:2px dashed var(--ink);border-radius:12px;padding:14px;margin:10px 0;text-align:center;word-break:break-all;user-select:all;-webkit-user-select:all}
+.krow,.urow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)}
+.krow code{font:700 14px ui-monospace,Menlo,Consolas,monospace;flex:1 1 200px;word-break:break-all}
+.urow b{flex:1 1 110px;word-break:break-all}
+.badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:700;background:var(--soft)}
+.badge.a{background:#FFF0BF}.badge.w{background:#FDE2E4;color:var(--red)}
+.btn.s{min-height:34px;padding:6px 10px;font-size:13px}
 </style>
 </head>
 <body>
@@ -147,6 +258,7 @@ nav button[aria-selected=true]{color:var(--ink);box-shadow:inset 0 3px 0 var(--y
   <section class="view" id="v-all"></section>
   <section class="view" id="v-who"></section>
   <section class="view" id="v-bkp"></section>
+  <section class="view" id="v-adm"></section>
 </main>
 <button class="fab" id="fab" type="button" aria-label="Adicionar Pokémon">+</button>
 <nav role="tablist">
@@ -154,6 +266,7 @@ nav button[aria-selected=true]{color:var(--ink);box-shadow:inset 0 3px 0 var(--y
   <button type="button" role="tab" data-tab="all" aria-selected="false"><span class="ic">🌐</span>Geral</button>
   <button type="button" role="tab" data-tab="who" aria-selected="false"><span class="ic">🔎</span>Quem tem?</button>
   <button type="button" role="tab" data-tab="bkp" aria-selected="false"><span class="ic">💾</span>Backup</button>
+  <button type="button" role="tab" data-tab="adm" id="navAdm" aria-selected="false" hidden><span class="ic">🛡️</span>Admin</button>
 </nav>
 <div class="modal" id="md"><div class="box" id="mdBox"></div></div>
 <div class="modal" id="lb"><img id="lbImg" alt=""></div>
@@ -271,7 +384,7 @@ if(CLOUD){
 function loadAuth(){var a=null;try{a=JSON.parse(localStorage.getItem(LSA)||'null');}catch(e){}a=a||{};return {owner:a.owner||'',session:a.session||null,cloudTs:a.cloudTs||'',dirty:!!a.dirty,skip:!!a.skip};}
 function saveAuth(){try{localStorage.setItem(LSA,JSON.stringify(A));}catch(e){}}
 function logged(){return CLOUD&&!!A.session;}
-function mailOf(u){return u+'@gestaogo.app';}
+function mailOf(u,v){return v?u+'@v'+v+'.gestaogo.app':u+'@gestaogo.app';}
 function setSession(user){A.session={uid:user.uid};saveAuth();}
 function ensure(){
   if(!A.session||!CLOUD)return Promise.resolve();
@@ -282,7 +395,12 @@ function ensure(){
 function errMsg(m){
   m=String(m||'');
   if(/invalid-credential|wrong-password|user-not-found|invalid-login/i.test(m))return 'Usuário ou senha incorretos';
-  if(/email-already-in-use/i.test(m))return 'Esse usuário já existe. Toque em Entrar.';
+  if(/x-exists|email-already-in-use/i.test(m))return 'Esse usuário já existe ou a senha não confere.';
+  if(/x-expired/i.test(m))return 'Seu acesso expirou. Peça uma nova chave ao administrador.';
+  if(/x-nouser/i.test(m))return 'Usuário não encontrado.';
+  if(/x-badkey/i.test(m))return 'Chave inválida, já usada ou de outro usuário.';
+  if(/x-noprofile/i.test(m))return 'Sua conta não está liberada. Use "Criar conta" ou "Esqueci minha senha" com a chave do administrador.';
+  if(/permission-denied|insufficient/i.test(m))return 'Sem permissão. Confira a chave e se as regras do Firestore foram publicadas.';
   if(/weak-password/i.test(m))return 'A senha precisa ter 6 caracteres ou mais';
   if(/operation-not-allowed/i.test(m))return 'No Firebase, ative o login por E-mail/senha (veja o topo do arquivo).';
   if(/too-many-requests/i.test(m))return 'Muitas tentativas. Espere um pouco e tente de novo.';
@@ -305,11 +423,14 @@ function fixAccounts(d){d.accounts.forEach(function(a){a.mons=a.mons||[];a.color
 function pullCloud(){
   return ensure().then(function(){
     if(!logged())throw new Error('nosession');
-    return fbDb.collection('gestao').doc(A.session.uid).get();
+    return cloudRef().get();
+  }).then(function(s){
+    if(s.exists)return s;
+    return fbDb.collection('gestao').doc(A.session.uid).get().then(function(l){if(l.exists)l.legacy=true;return l;},function(){return s;});
   }).then(function(s){
     if(!s.exists)return null;
     var d=s.data();
-    return {data:JSON.parse(d.json),updated_at:d.updated_at};
+    return {data:JSON.parse(d.json),updated_at:d.updated_at,legacy:!!s.legacy};
   });
 }
 function pushCloud(){
@@ -318,20 +439,20 @@ function pushCloud(){
   var ts=new Date().toISOString();
   return ensure().then(function(){
     if(!logged())return false;
-    return fbDb.collection('gestao').doc(A.session.uid).set({json:JSON.stringify(D),updated_at:ts})
+    return cloudRef().set({json:JSON.stringify(D),updated_at:ts})
     .then(function(){A.cloudTs=ts;A.dirty=false;saveAuth();setSync('ok');return true;});
-  }).catch(function(){setSync('err');return false;});
+  }).catch(function(e){if(e&&e.code==='permission-denied'){forceOut('Seu acesso foi encerrado. Fale com o administrador.');return false;}setSync('err');return false;});
 }
 function watch(){
   if(!logged()||unsub)return;
-  unsub=fbDb.collection('gestao').doc(A.session.uid).onSnapshot(function(s){
+  unsub=cloudRef().onSnapshot(function(s){
     if(!s.exists||s.metadata.hasPendingWrites||A.dirty)return;
     var d=s.data();
     if(!d||d.updated_at===A.cloudTs)return;
     if($('md').className.indexOf('on')>=0)return;
     try{applyCloud({data:JSON.parse(d.json),updated_at:d.updated_at});}catch(e){return;}
     draw();toast('Atualizado de outro aparelho');
-  },function(){});
+  },function(e){if(e&&e.code==='permission-denied')forceOut('Seu acesso foi encerrado. Fale com o administrador.');});
 }
 function unwatch(){if(unsub){unsub();unsub=null;}}
 function applyCloud(row){
@@ -347,20 +468,36 @@ function startSync(){
     var same=A.cloudTs&&new Date(row.updated_at).getTime()===new Date(A.cloudTs).getTime();
     if(same){if(A.dirty)return pushCloud();setSync('ok');return null;}
     if(A.dirty&&!confirm('Este aparelho e a nuvem têm alterações diferentes.\n\nOK = usar os dados da nuvem (descarta as alterações deste aparelho)\nCancelar = enviar os deste aparelho para a nuvem'))return pushCloud();
-    applyCloud(row);setSync('ok');draw();return null;
+    applyCloud(row);setSync('ok');draw();return row.legacy?pushCloud():null;
   }).then(function(){watch();}).catch(function(){setSync('err');});
 }
-function doLogin(up){
-  var u=norm($('lgU').value||'').replace(/[^a-z0-9._-]/g,''),pw=$('lgP').value||'';
+function doLogin(){
+  var u=cleanU($('lgU').value),pw=$('lgP').value||'';
   if(u.length<3){toast('Usuário: mínimo 3 letras ou números');return;}
   if(pw.length<6){toast('A senha precisa ter 6 caracteres ou mais');return;}
-  var p=up?fbAuth.createUserWithEmailAndPassword(mailOf(u),pw):fbAuth.signInWithEmailAndPassword(mailOf(u),pw);
-  p.then(function(c){setSession(c.user);return afterLogin(u);}).catch(function(e){toast(errMsg(e.code||e.message));});
+  if(LOCK)return;LOCK=true;
+  fbDb.collection('usernames').doc(u).get().then(function(s){
+    var d=s.exists?s.data():null;
+    if(d&&d.deleted)throw {code:'auth/invalid-credential'};
+    return fbAuth.signInWithEmailAndPassword(mailOf(u,d?d.ver:0),pw).catch(function(e){
+      if(u===ADMIN_USER&&!d&&/user-not-found|invalid-credential|invalid-login/.test(e.code||''))toast('Primeiro acesso do administrador? Toque em "Criar conta" e deixe a chave em branco.');
+      throw e;
+    });
+  }).then(function(c){
+    setSession(c.user);
+    return loadProfile(c.user.uid).then(function(p){
+      if(p&&isExpired(p))return fbAuth.signOut().catch(function(){}).then(function(){A.session=null;saveAuth();PROFILE=null;navRole();throw {code:'x-expired'};});
+      if(p)return p;
+      if(u===ADMIN_USER)return claimAdmin(c.user,u);
+      return fbAuth.signOut().catch(function(){}).then(function(){A.session=null;saveAuth();throw {code:'x-noprofile'};});
+    });
+  }).then(function(p){UN=p.username;return afterLogin(u);}).catch(function(e){toast(errMsg(e.code||e.message));}).then(unlock,unlock);
 }
 function afterLogin(u){
+  UN=u;
   var other=A.owner&&A.owner!==u;
   if(other){
-    if(A.dirty&&!confirm('Há alterações de "'+A.owner+'" neste aparelho que não foram para a nuvem. Entrar como "'+u+'" vai descartá-las. Continuar?')){A.session=null;saveAuth();return Promise.resolve();}
+    if(A.dirty&&!confirm('Há alterações de "'+A.owner+'" neste aparelho que não foram para a nuvem. Entrar como "'+u+'" vai descartá-las. Continuar?')){A.session=null;saveAuth();if(CLOUD)fbAuth.signOut().catch(function(){});return Promise.resolve();}
     D=defaults();A.dirty=false;A.cloudTs='';
   }
   setSync('busy');
@@ -372,34 +509,214 @@ function afterLogin(u){
       else useCloud=confirm('Encontrei dados na nuvem ('+cloudN+' Pokémon) e também neste aparelho ('+localN+').\n\nOK = usar os da nuvem (os deste aparelho ficam num backup interno)\nCancelar = enviar os deste aparelho para a nuvem (substitui a nuvem)');
     }
     A.owner=u;saveAuth();
-    if(useCloud){try{localStorage.setItem('gestgo.bak.v1',JSON.stringify(D));}catch(e){}applyCloud(row);setSync('ok');return null;}
+    if(useCloud){try{localStorage.setItem('gestgo.bak.v1',JSON.stringify(D));}catch(e){}applyCloud(row);setSync('ok');return row.legacy?pushCloud():null;}
     return pushCloud();
   }).then(function(){watch();}).then(function(){
-    hideGate();$('md').className='modal';updateAuthBtn();show('home');toast('Bem-vindo, '+u);
+    ADM.loaded=false;navRole();hideGate();$('md').className='modal';updateAuthBtn();show('home');toast('Bem-vindo, '+u);
   }).catch(function(){
-    setSync('err');toast('Entrou, mas não consegui sincronizar. Confira a configuração do Firebase.');hideGate();updateAuthBtn();show('home');
+    setSync('err');toast('Entrou, mas não consegui sincronizar. Confira as regras do Firestore.');navRole();hideGate();updateAuthBtn();show('home');
   });
 }
 function doLogout(){
   var go=function(){
     unwatch();if(CLOUD)fbAuth.signOut().catch(function(){});
-    A.session=null;A.owner='';A.cloudTs='';A.dirty=false;A.skip=false;saveAuth();
+    A.session=null;A.owner='';A.cloudTs='';A.dirty=false;A.skip=false;saveAuth();UN='';PROFILE=null;ADM.loaded=false;navRole();
     Object.keys(PHC).forEach(dropCache);
     D=defaults();try{localStorage.setItem(LS,JSON.stringify(D));}catch(e){}
-    $('md').className='modal';updateAuthBtn();show('home');showGate();
+    $('md').className='modal';updateAuthBtn();show('home');showGate('in');
   };
   if(A.dirty){pushCloud().then(function(ok){if(!ok&&!confirm('Não consegui enviar as últimas alterações para a nuvem. Sair mesmo assim e perder essas alterações?'))return;go();});}
   else go();
 }
-function showGate(){
+/* ---- Admin, chaves e perfis ---- */
+var ADMIN_USER='davidkannedy',UN='',PROFILE=null,GMODE='in',LOCK=false;
+var ADM={keys:[],users:[],busy:false,loaded:false,err:''};
+function isAdm(){return !!(PROFILE&&PROFILE.role==='admin');}
+function cleanU(s){return norm(s||'').replace(/[^a-z0-9._-]/g,'').slice(0,20);}
+function normKey(s){var c=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return c.replace(/(.{4})(?=.)/g,'$1-');}
+function newKey(){var al='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',b=new Uint8Array(20),s='',i;crypto.getRandomValues(b);for(i=0;i<20;i++)s+=al.charAt(b[i]%32);return s.replace(/(.{4})(?=.)/g,'$1-');}
+function cloudRef(){return fbDb.collection('gestao').doc(UN);}
+function navRole(){var n=$('navAdm');if(n)n.hidden=!isAdm();}
+function expDate(p){var e=p&&p.expiresAt;return e?(e.toDate?e.toDate():new Date(e)):null;}
+function isExpired(p){var d=expDate(p);return !!d&&p.role!=='admin'&&d.getTime()<=Date.now();}
+function durLabel(n){return n===7?'7 dias':n===30?'30 dias':'Permanente';}
+function fmtDay(d){return d.toLocaleDateString('pt-BR');}
+function unlock(x){LOCK=false;return x;}
+function loadProfile(uid){return fbDb.collection('users').doc(uid).get().then(function(s){PROFILE=s.exists?s.data():null;navRole();return PROFILE;});}
+function claimAdmin(user,u){
+  var p={username:u,role:'admin',createdAt:new Date().toISOString()},b=fbDb.batch();
+  b.set(fbDb.collection('users').doc(user.uid),p);
+  b.set(fbDb.collection('usernames').doc(u),{uid:user.uid,ver:0,deleted:false});
+  return b.commit().then(function(){PROFILE=p;navRole();return p;});
+}
+function forceOut(msg){
+  unwatch();if(CLOUD)fbAuth.signOut().catch(function(){});
+  A.session=null;A.owner='';A.cloudTs='';A.dirty=false;saveAuth();UN='';PROFILE=null;ADM.loaded=false;
+  Object.keys(PHC).forEach(dropCache);
+  D=defaults();try{localStorage.setItem(LS,JSON.stringify(D));}catch(e){}
+  navRole();updateAuthBtn();show('home');showGate('in');if(msg)toast(msg);
+}
+function resume(){
+  UN=A.owner;
+  return ensure().then(function(){
+    if(!logged())return null;
+    return loadProfile(A.session.uid).then(function(p){
+      if(!p){forceOut('Sua conta foi removida ou aguarda recuperação. Fale com o administrador.');return null;}
+      if(isExpired(p)){forceOut('Seu acesso expirou. Peça uma nova chave ao administrador.');return null;}
+      UN=p.username;A.owner=p.username;saveAuth();updateAuthBtn();return startSync();
+    });
+  }).catch(function(){navRole();return startSync();});
+}
+function claimWithKey(u,pw,k,kind){
+  var isAd=(u===ADMIN_USER&&kind==='register'),ver=0,wasDel=false,created=false,uid=null,p=null;
+  if(kind==='reset'&&u===ADMIN_USER){toast('A senha do administrador se troca em "Alterar senha" ou pelo console do Firebase');return Promise.resolve();}
+  if(LOCK)return Promise.resolve();LOCK=true;
+  return fbDb.collection('usernames').doc(u).get().then(function(s){
+    var d=s.exists?s.data():null;
+    if(kind==='register'){if(d&&!d.deleted)throw {code:'x-exists'};if(d){ver=d.ver;wasDel=true;}}
+    else{if(!d||d.deleted)throw {code:'x-nouser'};ver=d.ver+1;}
+    var mail=mailOf(u,ver);
+    return fbAuth.createUserWithEmailAndPassword(mail,pw).then(function(c){created=true;return c;},function(e){
+      if(/email-already-in-use/.test(e.code||''))return fbAuth.signInWithEmailAndPassword(mail,pw).catch(function(){throw {code:'x-exists'};});
+      throw e;
+    });
+  }).then(function(c){
+    uid=c.user.uid;
+    var kr=fbDb.collection('keys').doc(k);
+    var chk=isAd?Promise.resolve(null):kr.get().then(function(ks){
+      var d=ks.exists?ks.data():null;
+      if(!d||d.used||d.type!==kind||(kind==='reset'&&d.username!==u))throw {code:'x-badkey'};
+      return d;
+    });
+    return chk.then(function(kd){
+      var b=fbDb.batch(),now=new Date().toISOString(),ur=fbDb.collection('usernames').doc(u);
+      p={username:u,role:isAd?'admin':'user',createdAt:now};
+      if(!isAd){
+        p.key=k;
+        if(kind==='register'&&kd.days>0)p.expiresAt=firebase.firestore.Timestamp.fromDate(new Date(Date.now()+kd.days*864e5));
+        else if(kind==='reset'&&kd.expiresAt)p.expiresAt=kd.expiresAt;
+        b.update(kr,{used:true,usedBy:uid,usedByName:u,usedAt:now});}
+      b.set(fbDb.collection('users').doc(uid),p);
+      if(kind==='register'&&!wasDel)b.set(ur,{uid:uid,ver:0,deleted:false});
+      else b.update(ur,{uid:uid,ver:ver,deleted:false});
+      return b.commit();
+    }).then(function(){setSession(c.user);PROFILE=p;UN=u;navRole();return afterLogin(u);});
+  }).catch(function(e){
+    var out=(created&&fbAuth.currentUser)?fbAuth.currentUser.delete().catch(function(){}):Promise.resolve();
+    return out.then(function(){
+      if(!created&&fbAuth.currentUser&&!PROFILE)return fbAuth.signOut().catch(function(){});
+    }).then(function(){A.session=null;saveAuth();toast(errMsg(e.code||e.message));});
+  }).then(unlock,unlock);
+}
+function doRegister(){
+  var u=cleanU($('lgU').value),pw=$('lgP').value||'',k=normKey($('lgK').value);
+  if(u.length<3){toast('Usuário: mínimo 3 letras ou números');return;}
+  if(pw.length<6){toast('A senha precisa ter 6 caracteres ou mais');return;}
+  if(u!==ADMIN_USER&&k.length!==24){toast('Digite a chave completa que o administrador te passou');return;}
+  claimWithKey(u,pw,k,'register');
+}
+function doReset(){
+  var u=cleanU($('lgU').value),pw=$('lgP').value||'',k=normKey($('lgK').value);
+  if(u.length<3){toast('Digite seu usuário');return;}
+  if(pw.length<6){toast('A nova senha precisa ter 6 caracteres ou mais');return;}
+  if(k.length!==24){toast('Digite a chave de recuperação completa');return;}
+  claimWithKey(u,pw,k,'reset');
+}
+function openPwModal(){
+  $('mdBox').innerHTML='<h2>Alterar senha</h2><input class="in" id="pwO" type="password" placeholder="Senha atual" autocomplete="current-password" style="margin-bottom:8px"><input class="in" id="pwN" type="password" placeholder="Nova senha (mínimo 6)" autocomplete="new-password"><div class="row" style="margin-top:10px"><button class="btn y" id="pwGo" type="button">Salvar</button><button class="btn o" id="mNo" type="button">Cancelar</button></div>';
+  $('md').className='modal on';
+}
+function doPw(){
+  var o=$('pwO').value,n=$('pwN').value,u=fbAuth.currentUser;
+  if(!u){toast('Entre de novo');return;}
+  if(n.length<6){toast('A nova senha precisa ter 6 caracteres ou mais');return;}
+  u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email,o)).then(function(){return u.updatePassword(n);})
+   .then(function(){$('md').className='modal';toast('Senha alterada');}).catch(function(e){toast(errMsg(e.code||e.message));});
+}
+function copyTxt(t){
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(function(){toast('Copiado');},function(){toast('Não consegui copiar');});
+  else toast('Seu navegador não permite copiar. Selecione o texto.');
+}
+function admFail(e){toast(errMsg(e&&(e.code||e.message)));}
+function fmtD(s){try{return new Date(s).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
+function admLoad(){
+  ADM.busy=true;ADM.err='';renderAdm();
+  Promise.all([fbDb.collection('keys').get(),fbDb.collection('usernames').get(),fbDb.collection('users').get()]).then(function(r){
+    ADM.keys=r[0].docs.map(function(d){var x=d.data();x.id=d.id;return x;}).sort(function(a,b){return String(b.createdAt).localeCompare(String(a.createdAt));});
+    var prof={};r[2].docs.forEach(function(d){prof[d.id]=d.data();});
+    ADM.users=r[1].docs.map(function(d){var x=d.data();x.name=d.id;x.p=prof[x.uid]||null;return x;}).filter(function(x){return !x.deleted;}).sort(function(a,b){return a.name<b.name?-1:1;});
+    ADM.busy=false;ADM.loaded=true;renderAdm();
+  }).catch(function(e){ADM.busy=false;ADM.err=errMsg(e.code||e.message);renderAdm();});
+}
+function renderAdm(){
+  var el=$('v-adm');if(!el)return;
+  if(!isAdm()){el.innerHTML='';return;}
+  if(!ADM.loaded&&!ADM.busy&&!ADM.err){admLoad();return;}
+  var h='<div class="bar"><h2>🛡️ Painel Admin</h2><button class="btn o s" type="button" data-adm="refresh">↻ Atualizar</button></div>';
+  if(ADM.err)h+='<div class="panel"><p style="color:#D7263D">'+esc(ADM.err)+'</p></div>';
+  if(ADM.busy&&!ADM.loaded)h+='<div class="empty">Carregando…</div>';
+  var free=ADM.keys.filter(function(k){return !k.used;}),used=ADM.keys.filter(function(k){return k.used;});
+  h+='<div class="panel"><h3>🔑 Chaves de cadastro</h3><p>Escolha por quanto tempo a conta fica ativa depois de criada. Cada chave cria uma única conta e depois deixa de valer. Não há limite de chaves.</p><div class="row"><button class="btn y" type="button" data-adm="genkey" data-days="7">🔑 7 dias</button><button class="btn y" type="button" data-adm="genkey" data-days="30">🔑 30 dias</button><button class="btn o" type="button" data-adm="genkey" data-days="0">🔑 Permanente</button></div>';
+  if(free.length){h+='<div style="margin-top:10px"><b>Disponíveis ('+free.length+')</b></div>';free.forEach(function(k){
+    h+='<div class="krow"><code>'+esc(k.id)+'</code><span class="badge'+(k.type==='reset'?' w':'')+'">'+(k.type==='reset'?'Recuperação: '+esc(k.username||''):'Cadastro · '+durLabel(k.days))+'</span><button class="btn o s" type="button" data-adm="copy" data-k="'+esc(k.id)+'">Copiar</button><button class="btn r s" type="button" data-adm="delkey" data-k="'+esc(k.id)+'">Revogar</button></div>';});}
+  else if(ADM.loaded)h+='<p class="lg" style="margin-top:10px">Nenhuma chave disponível no momento.</p>';
+  if(used.length){h+='<div style="margin-top:12px"><b>Já usadas ('+used.length+')</b></div>';used.forEach(function(k){
+    h+='<div class="krow"><code style="opacity:.6">'+esc(k.id)+'</code><span class="badge">'+(k.type==='reset'?'Recuperou':'Criou ('+durLabel(k.days)+')')+' '+esc(k.usedByName||'')+'</span><span class="lg" style="margin:0">'+esc(fmtD(k.usedAt))+'</span></div>';});}
+  h+='</div><div class="panel"><h3>👥 Usuários ('+ADM.users.length+')</h3><p>Recuperar senha gera uma chave de recuperação e bloqueia o acesso atual até a pessoa usá-la. Os dados dela são mantidos. Excluir apaga a conta e os dados.</p>';
+  ADM.users.forEach(function(x){
+    var adm=x.p&&x.p.role==='admin',pend=!x.p,ed=expDate(x.p),exp=!!(x.p&&isExpired(x.p));
+    h+='<div class="urow"><b>'+esc(x.name)+'</b><span class="badge'+(adm?' a':(pend||exp)?' w':'')+'">'+(adm?'Admin':pend?'Aguardando recuperação':exp?'Expirado':'Ativo')+'</span>'+(adm||pend?'':'<span class="badge">'+(ed?(exp?'expirou em ':'até ')+esc(fmtDay(ed)):'Permanente')+'</span>')+'<span class="lg" style="margin:0">'+esc(x.p?fmtD(x.p.createdAt):'')+'</span>';
+    if(!adm&&!pend)h+='<button class="btn o s" type="button" data-adm="renew" data-u="'+esc(x.name)+'" data-uid="'+esc(x.uid)+'">Renovar</button>';
+    if(!adm)h+='<button class="btn o s" type="button" data-adm="reset" data-u="'+esc(x.name)+'" data-uid="'+(x.p?esc(x.uid):'')+'">Recuperar senha</button><button class="btn r s" type="button" data-adm="deluser" data-u="'+esc(x.name)+'" data-uid="'+(x.p?esc(x.uid):'')+'" data-ver="'+esc(x.ver)+'">Excluir</button>';
+    h+='</div>';});
+  if(ADM.loaded&&!ADM.users.length)h+='<p class="lg">Nenhum usuário ainda.</p>';
+  h+='</div>';
+  el.innerHTML=h;
+}
+function showKey(k,type,u,days){
+  $('mdBox').innerHTML='<h2>'+(type==='reset'?'Chave de recuperação':'Nova chave · '+durLabel(days))+'</h2><p style="color:#5D6B82">'+(type==='reset'?'Passe esta chave para <b>'+esc(u)+'</b>. Na tela de login: "Esqueci minha senha" → usuário, nova senha e esta chave.':'Passe esta chave para a pessoa. Na tela de login: "Criar conta" → usuário, senha e esta chave. Vale para uma única conta, com acesso de <b>'+durLabel(days).toLowerCase()+'</b> a partir do cadastro.')+'</p><div class="kbox">'+esc(k)+'</div><div class="row"><button class="btn y" type="button" data-adm="copy" data-k="'+esc(k)+'">Copiar chave</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
+  $('md').className='modal on';
+}
+function keyDoc(type,u,days,exp){var d={type:type,used:false,usedBy:null,usedByName:null,usedAt:null,createdAt:new Date().toISOString()};if(type==='reset'){d.username=u;if(exp)d.expiresAt=exp;}else d.days=days;return d;}
+function admAct(b){
+  var a=b.getAttribute('data-adm'),k=b.getAttribute('data-k'),u=b.getAttribute('data-u'),uid=b.getAttribute('data-uid');
+  if(a==='refresh'){ADM.loaded=false;ADM.err='';admLoad();return;}
+  if(a==='copy'){copyTxt(k);return;}
+  if(a==='genkey'){var nk=newKey(),gd=+b.getAttribute('data-days')||0;fbDb.collection('keys').doc(nk).set(keyDoc('register','',gd)).then(function(){showKey(nk,'register','',gd);ADM.loaded=false;admLoad();}).catch(admFail);return;}
+  if(a==='delkey'){if(!confirm('Revogar esta chave? Ela deixa de funcionar.'))return;fbDb.collection('keys').doc(k).delete().then(function(){toast('Chave revogada');ADM.loaded=false;admLoad();}).catch(admFail);return;}
+  if(a==='reset'){
+    if(!confirm('Recuperar a senha de "'+u+'"?\n\nO acesso atual dessa pessoa será bloqueado e será gerada uma chave de recuperação. Os dados dela são mantidos.'))return;
+    var rk=newKey(),rb=fbDb.batch();
+    if(uid)rb.delete(fbDb.collection('users').doc(uid));
+    var ux=ADM.users.filter(function(x){return x.name===u;})[0];rb.set(fbDb.collection('keys').doc(rk),keyDoc('reset',u,0,ux&&ux.p&&ux.p.expiresAt?ux.p.expiresAt:null));
+    rb.commit().then(function(){showKey(rk,'reset',u);ADM.loaded=false;admLoad();}).catch(admFail);return;
+  }
+  if(a==='renew'){ADM.renew={uid:uid,u:u};$('mdBox').innerHTML='<h2>Renovar acesso</h2><p style="color:#5D6B82">Novo prazo para <b>'+esc(u)+'</b>, contado a partir de agora.</p><div class="row"><button class="btn y" type="button" data-adm="renewgo" data-days="7">7 dias</button><button class="btn y" type="button" data-adm="renewgo" data-days="30">30 dias</button><button class="btn o" type="button" data-adm="renewgo" data-days="0">Permanente</button><button class="btn o" id="mNo" type="button">Cancelar</button></div>';$('md').className='modal on';return;}
+  if(a==='renewgo'){var rd=+b.getAttribute('data-days')||0,rv=ADM.renew;if(!rv)return;fbDb.collection('users').doc(rv.uid).update({expiresAt:rd>0?firebase.firestore.Timestamp.fromDate(new Date(Date.now()+rd*864e5)):firebase.firestore.FieldValue.delete()}).then(function(){$('md').className='modal';toast('Acesso renovado: '+durLabel(rd).toLowerCase());ADM.loaded=false;admLoad();}).catch(admFail);return;}
+  if(a==='deluser'){
+    if(!confirm('Excluir "'+u+'"?\n\nA conta e TODOS os dados dessa pessoa serão apagados. Não dá para desfazer.'))return;
+    var db=fbDb.batch(),ver=+b.getAttribute('data-ver')||0;
+    if(uid)db.delete(fbDb.collection('users').doc(uid));
+    db.update(fbDb.collection('usernames').doc(u),{uid:null,ver:ver+1,deleted:true});
+    db.delete(fbDb.collection('gestao').doc(u));
+    db.commit().then(function(){toast('Usuário excluído');ADM.loaded=false;admLoad();}).catch(admFail);return;
+  }
+}
+function showGate(mode){
   if(!CLOUD)return;
-  $('gate').innerHTML='<div class="gbox"><div class="logo">✨</div><h2>Minhas Contas GO</h2><p>Entre para ver suas contas em qualquer aparelho. Cada pessoa vê só as próprias contas.</p>'+
-   '<input class="in" id="lgU" placeholder="Usuário (ex.: david)" autocomplete="username" autocapitalize="none" maxlength="30">'+
-   '<input class="in" id="lgP" type="password" placeholder="Senha (mínimo 6 caracteres)" autocomplete="current-password">'+
-   '<div class="row"><button class="btn y" id="lgIn" type="button">Entrar</button><button class="btn o" id="lgUp" type="button">Criar conta</button></div>'+
-   '<p class="lg">Não existe recuperação de senha, então anote a sua.</p>'+
-   '<div class="row" style="margin-top:10px"><button class="btn o" id="lgSkip" type="button">Continuar sem login (só neste aparelho)</button></div></div>';
-  $('gate').className='on';
+  mode=mode||'in';GMODE=mode;
+  var h='<div class="gbox"><div class="logo">✨</div><h2>Minhas Contas GO</h2>';
+  if(mode==='in')h+='<p>Entre com seu usuário e senha. Para criar uma conta você precisa de uma chave do administrador.</p>';
+  else if(mode==='up')h+='<p>Crie sua conta com a chave que o administrador te passou. Cada chave vale para uma única conta.</p>';
+  else h+='<p>Defina uma nova senha usando a chave de recuperação que o administrador te passou.</p>';
+  h+='<input class="in" id="lgU" placeholder="Usuário" autocomplete="username" autocapitalize="none" maxlength="20">'+
+     '<input class="in" id="lgP" type="password" placeholder="'+(mode==='in'?'Senha':'Senha (mínimo 6 caracteres)')+'" autocomplete="'+(mode==='in'?'current-password':'new-password')+'">';
+  if(mode!=='in')h+='<input class="in" id="lgK" placeholder="Chave (XXXX-XXXX-XXXX-XXXX-XXXX)" autocapitalize="characters" autocomplete="off" maxlength="30">';
+  if(mode==='in')h+='<div class="row"><button class="btn y" id="lgIn" type="button">Entrar</button><button class="btn o" id="lgGoUp" type="button">Criar conta</button></div><p class="lg"><button class="btn o s" id="lgGoRec" type="button">Esqueci minha senha</button></p>';
+  else if(mode==='up')h+='<div class="row"><button class="btn y" id="lgUp" type="button">Criar conta</button><button class="btn o" id="lgBack" type="button">Voltar</button></div>';
+  else h+='<div class="row"><button class="btn y" id="lgRec" type="button">Redefinir senha</button><button class="btn o" id="lgBack" type="button">Voltar</button></div>';
+  h+='</div>';
+  $('gate').innerHTML=h;$('gate').className='on';
 }
 function hideGate(){$('gate').className='';}
 function openAuthModal(){
@@ -407,8 +724,8 @@ function openAuthModal(){
     $('mdBox').innerHTML='<h2>Login</h2><p style="color:#5D6B82">O login ainda não está ativado neste arquivo. Para ativar, crie um projeto gratuito no Firebase e cole o firebaseConfig no começo do script. O passo a passo está nos comentários no topo do arquivo HTML.</p><div class="row"><button class="btn o" id="mNo" type="button">Fechar</button></div>';
   }else if(logged()){
     var st=SYNC==='busy'?'⏳ sincronizando…':SYNC==='err'?'⚠️ erro ao sincronizar (suas alterações ficam neste aparelho até conseguir)':A.dirty?'⏳ alterações pendentes':'☁️ tudo sincronizado';
-    $('mdBox').innerHTML='<h2>Sua conta</h2><p style="color:#5D6B82">Conectado como <b>'+esc(A.owner)+'</b>. Suas 13 contas ficam salvas na nuvem e aparecem em qualquer aparelho em que você entrar.</p><p>'+st+'</p><div class="row"><button class="btn y" id="syncNow" type="button">Sincronizar agora</button><button class="btn r" id="lgOut" type="button">Sair</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
-  }else{showGate();return;}
+    $('mdBox').innerHTML='<h2>Sua conta</h2><p style="color:#5D6B82">Conectado como <b>'+esc(A.owner)+'</b>'+(isAdm()?' <span class="badge a">Admin</span>':'')+'. Suas contas ficam salvas na nuvem e aparecem em qualquer aparelho em que você entrar.</p><p>'+st+'</p><div class="row"><button class="btn y" id="syncNow" type="button">Sincronizar agora</button><button class="btn o" id="pwChg" type="button">Alterar senha</button><button class="btn r" id="lgOut" type="button">Sair</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
+  }else{showGate('in');return;}
   $('md').className='modal on';
 }
 
@@ -856,9 +1173,9 @@ function openAcc(){
 
 /* ---------- Navegação ---------- */
 function show(tab,accId){
-  V.tab=tab; if(accId){V.acc=accId;V.f=[];V.q='';V.mode='list';}
+  if(tab==='adm'&&!isAdm())tab='home';V.tab=tab; if(accId){V.acc=accId;V.f=[];V.q='';V.mode='list';}
   var key=tab==='home'&&false?'':tab;
-  ['home','acc','all','who','bkp'].forEach(function(x){$('v-'+x).className='view'+(x===tab?' on':'');});
+  ['home','acc','all','who','bkp','adm'].forEach(function(x){$('v-'+x).className='view'+(x===tab?' on':'');});
   var nt=tab==='acc'?'home':tab, nb=document.querySelectorAll('nav button');
   for(var i=0;i<nb.length;i++)nb[i].setAttribute('aria-selected',nb[i].getAttribute('data-tab')===nt?'true':'false');
   $('fab').className='fab'+(tab==='acc'?' on':'');
@@ -867,7 +1184,7 @@ function show(tab,accId){
 function draw(){
   var t=0;D.accounts.forEach(function(a){t+=a.mons.length;});
   $('sub').textContent=D.accounts.length+' contas · '+t+' Pokémon registrados';
-  if(V.tab==='home')renderHome();else if(V.tab==='acc')renderAcc();else if(V.tab==='all')renderAll();else if(V.tab==='who')renderWho();else renderBkp();
+  if(V.tab==='home')renderHome();else if(V.tab==='acc')renderAcc();else if(V.tab==='all')renderAll();else if(V.tab==='who')renderWho();else if(V.tab==='adm')renderAdm();else renderBkp();
 }
 
 /* ---------- Eventos ---------- */
@@ -898,9 +1215,15 @@ document.addEventListener('click',function(e){
   if(b.hasAttribute('data-sp')){var id=+b.getAttribute('data-sp');M.dex=id;M.name=SPN[id];M.sp=0;$('mName').value=M.name;$('sug').innerHTML='';$('pick').textContent='✓ '+M.name+' #'+id;M.fk='';refreshForms();return;}
   if(b.hasAttribute('data-color')){var a=acc(V.acc);a.color=b.getAttribute('data-color');save();openAcc();return;}
   if(b.id==='authBtn'){openAuthModal();return;}
-  if(b.id==='lgIn'){doLogin(false);return;}
-  if(b.id==='lgUp'){doLogin(true);return;}
-  if(b.id==='lgSkip'){A.skip=true;saveAuth();hideGate();updateAuthBtn();return;}
+  if(b.id==='lgIn'){doLogin();return;}
+  if(b.id==='lgUp'){doRegister();return;}
+  if(b.id==='lgRec'){doReset();return;}
+  if(b.id==='lgGoUp'){showGate('up');return;}
+  if(b.id==='lgGoRec'){showGate('rec');return;}
+  if(b.id==='lgBack'){showGate('in');return;}
+  if(b.id==='pwChg'){openPwModal();return;}
+  if(b.id==='pwGo'){doPw();return;}
+  if(b.hasAttribute('data-adm')){admAct(b);return;}
   if(b.id==='syncNow'){$('md').className='modal';toast('Sincronizando…');startSync().then(function(){toast('Sincronizado');});return;}
   if(b.id==='lgOut'){doLogout();return;}
   if(b.id==='phPick'){$('mFile').click();return;}
@@ -939,7 +1262,7 @@ document.addEventListener('input',function(e){
   else if(t.id==='gq'){G.q=t.value;drawAll();}
   else if(t.id==='mName'){M.dex=0;M.name='';M.fk='';$('pick').textContent='';suggest(t.value);var q9=norm(t.value).trim(),ex=q9&&SP.filter(function(x){return norm(x.name)===q9;})[0];if(ex){M.dex=ex.id;M.name=ex.name;M.sp=0;$('pick').textContent='✓ '+ex.name+' #'+ex.id;}refreshForms();}
 });
-document.addEventListener('keydown',function(e){if(e.key==='Enter'&&(e.target.id==='lgP'||e.target.id==='lgU'))doLogin(false);});
+document.addEventListener('keydown',function(e){if(e.key==='Enter'&&(e.target.id==='lgP'||e.target.id==='lgU'||e.target.id==='lgK')){if(GMODE==='in')doLogin();else if(GMODE==='up')doRegister();else doReset();}});
 document.addEventListener('change',function(e){
   if(e.target.id==='mForm'){M.fk=e.target.value;return;}
   if(e.target.id==='mFile'&&e.target.files[0]){var pf=e.target.files[0];if(pf.size>40*1024*1024){toast('Foto muito grande (máximo 40 MB)');return;}M.file=pf;M.rm=false;renderPh();return;}
@@ -966,8 +1289,8 @@ function cap(n){return n.split('-').map(function(w){return w.charAt(0).toUpperCa
 
 function boot(){
   updateAuthBtn();
-  if(CLOUD&&!A.session&&!A.skip)showGate();
-  else if(logged())startSync();
+  if(CLOUD&&!A.session)showGate('in');
+  else if(logged())resume();
   show('home');
 }
 boot();
