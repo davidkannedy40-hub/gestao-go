@@ -687,6 +687,13 @@ function expDate(p){var e=p&&p.expiresAt;return e?(e.toDate?e.toDate():new Date(
 function isExpired(p){var d=expDate(p);return !!d&&p.role!=='admin'&&d.getTime()<=Date.now();}
 function durLabel(n){return n===7?'7 dias':n===30?'30 dias':'Permanente';}
 function fmtDay(d){return d.toLocaleDateString('pt-BR');}
+function accessHtml(){
+  if(isAdm()||!PROFILE)return '';
+  var d=expDate(PROFILE);
+  if(!d)return '<p>🔑 Sua key: <b>acesso permanente</b></p>';
+  var n=Math.ceil((d.getTime()-Date.now())/864e5),w=n<=7;
+  return '<div style="margin:8px 0;padding:10px 12px;border-radius:12px;background:'+(w?'#FFF3E0':'#EAF6EE')+'"><p style="margin:0">🔑 Sua key vale até <b>'+esc(fmtDay(d))+'</b> ('+(n<=0?'vence hoje':n===1?'falta 1 dia':'faltam '+n+' dias')+').</p><p style="margin:6px 0 8px;color:#5D6B82">Para renovar sem perder seus dados, chame o administrador.</p><button class="btn y s" id="admDm" type="button">💬 Falar com o admin para renovar</button></div>';
+}
 function unlock(x){LOCK=false;return x;}
 function loadProfile(uid){return fbDb.collection('users').doc(uid).get().then(function(s){PROFILE=s.exists?s.data():null;navRole();return PROFILE;});}
 function claimAdmin(user,u){
@@ -802,7 +809,7 @@ function renderAdm(){
   if(ADM.err)h+='<div class="panel"><p style="color:#D7263D">'+esc(ADM.err)+'</p></div>';
   if(ADM.busy&&!ADM.loaded)h+='<div class="empty">Carregando…</div>';
   var free=ADM.keys.filter(function(k){return !k.used;}),used=ADM.keys.filter(function(k){return k.used;});
-  h+='<div class="panel"><h3>🔑 Chaves de cadastro</h3><p>Escolha por quanto tempo a conta fica ativa depois de criada. Cada chave cria uma única conta e depois deixa de valer. Não há limite de chaves.</p><div class="row"><button class="btn y" type="button" data-adm="genkey" data-days="7">🔑 7 dias</button><button class="btn y" type="button" data-adm="genkey" data-days="30">🔑 30 dias</button><button class="btn o" type="button" data-adm="genkey" data-days="0">🔑 Permanente</button></div>';
+  h+='<div class="panel"><h3>🔑 Chaves de cadastro</h3><p>Escolha por quanto tempo a conta fica ativa depois de criada. Cada chave cria uma única conta e depois deixa de valer. Não há limite de chaves.</p><div class="row"><button class="btn y" type="button" data-adm="genkey" data-days="7">🔑 7 dias</button><button class="btn y" type="button" data-adm="genkey" data-days="30">🔑 30 dias</button><button class="btn o" type="button" data-adm="genkey" data-days="0">🔑 Permanente</button></div><div class="row" style="margin-top:8px"><button class="btn y" type="button" data-adm="genmany" data-days="30" data-n="30">🔑 Gerar 30 chaves de 30 dias</button></div>';
   if(free.length){h+='<div style="margin-top:10px"><b>Disponíveis ('+free.length+')</b></div>';free.forEach(function(k){
     h+='<div class="krow"><code>'+esc(k.id)+'</code><span class="badge'+(k.type==='reset'?' w':'')+'">'+(k.type==='reset'?'Recuperação: '+esc(k.username||''):'Cadastro · '+durLabel(k.days))+'</span><button class="btn o s" type="button" data-adm="copy" data-k="'+esc(k.id)+'">Copiar</button><button class="btn r s" type="button" data-adm="delkey" data-k="'+esc(k.id)+'">Revogar</button></div>';});}
   else if(ADM.loaded)h+='<p class="lg" style="margin-top:10px">Nenhuma chave disponível no momento.</p>';
@@ -812,7 +819,7 @@ function renderAdm(){
   ADM.users.forEach(function(x){
     var adm=x.p&&x.p.role==='admin',pend=!x.p,ed=expDate(x.p),exp=!!(x.p&&isExpired(x.p));
     h+='<div class="urow"><b>'+esc(x.name)+'</b><span class="badge'+(adm?' a':(pend||exp)?' w':'')+'">'+(adm?'Admin':pend?'Aguardando recuperação':exp?'Expirado':'Ativo')+'</span>'+(adm||pend?'':'<span class="badge">'+(ed?(exp?'expirou em ':'até ')+esc(fmtDay(ed)):'Permanente')+'</span>')+'<span class="lg" style="margin:0">'+esc(x.p?fmtD(x.p.createdAt):'')+'</span>';
-    if(!adm&&!pend)h+='<button class="btn o s" type="button" data-adm="renew" data-u="'+esc(x.name)+'" data-uid="'+esc(x.uid)+'">Renovar</button>';
+    if(!adm&&!pend)h+='<button class="btn o s" type="button" data-adm="renew" data-u="'+esc(x.name)+'" data-uid="'+esc(x.uid)+'">🔑 Renovar key</button>';
     if(!adm)h+='<button class="btn o s" type="button" data-adm="reset" data-u="'+esc(x.name)+'" data-uid="'+(x.p?esc(x.uid):'')+'">Recuperar senha</button><button class="btn r s" type="button" data-adm="deluser" data-u="'+esc(x.name)+'" data-uid="'+(x.p?esc(x.uid):'')+'" data-ver="'+esc(x.ver)+'">Excluir</button>';
     h+='</div>';});
   if(ADM.loaded&&!ADM.users.length)h+='<p class="lg">Nenhum usuário ainda.</p>';
@@ -832,6 +839,9 @@ function admAct(b){
   if(a==='repdel'){var rp=b.getAttribute('data-p'),rid=b.getAttribute('data-id');if(!/^(chatGlobal\/[A-Za-z0-9]+|dms\/[a-z0-9._-]+__[a-z0-9._-]+\/msgs\/[A-Za-z0-9]+|tradeItems\/[A-Za-z0-9]+)$/.test(rp)){toast('Caminho inválido');return;}if(!confirm('Excluir este conteúdo?'))return;var rb=fbDb.batch(),pm=rp.match(/^tradeItems\/(.+)$/);rb.delete(fbDb.doc(rp));if(pm)rb.delete(fbDb.collection('tradePhotos').doc(pm[1]));rb.delete(fbDb.collection('reports').doc(rid));rb.commit().then(function(){toast('Conteúdo excluído');ADM.loaded=false;admLoad();}).catch(admFail);return;}
   if(a==='copy'){copyTxt(k);return;}
   if(a==='genkey'){var nk=newKey(),gd=+b.getAttribute('data-days')||0;fbDb.collection('keys').doc(nk).set(keyDoc('register','',gd)).then(function(){showKey(nk,'register','',gd);ADM.loaded=false;admLoad();}).catch(admFail);return;}
+  if(a==='genmany'){var gn=+b.getAttribute('data-n')||30,gdd=+b.getAttribute('data-days')||30,ks=[],gb=fbDb.batch(),gi;if(!confirm('Gerar '+gn+' chaves de '+durLabel(gdd).toLowerCase()+'?'))return;for(gi=0;gi<gn;gi++){var kk=newKey();ks.push(kk);gb.set(fbDb.collection('keys').doc(kk),keyDoc('register','',gdd));}
+    gb.commit().then(function(){window.__KS=ks.join('\n');$('mdBox').innerHTML='<h2>'+gn+' chaves · '+esc(durLabel(gdd))+'</h2><p style="color:#5D6B82">Cada chave vale para uma única conta. Copie a lista e cole no grupo (uma por linha).</p><textarea class="in" readonly rows="10" style="font-family:monospace;width:100%">'+esc(window.__KS)+'</textarea><div class="row"><button class="btn y" type="button" data-adm="copyall">Copiar todas</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';$('md').className='modal on';ADM.loaded=false;admLoad();}).catch(admFail);return;}
+  if(a==='copyall'){copyTxt(window.__KS||'');return;}
   if(a==='delkey'){if(!confirm('Revogar esta chave? Ela deixa de funcionar.'))return;fbDb.collection('keys').doc(k).delete().then(function(){toast('Chave revogada');ADM.loaded=false;admLoad();}).catch(admFail);return;}
   if(a==='reset'){
     if(!confirm('Recuperar a senha de "'+u+'"?\n\nO acesso atual dessa pessoa será bloqueado e será gerada uma chave de recuperação. Os dados dela são mantidos.'))return;
@@ -840,8 +850,8 @@ function admAct(b){
     var ux=ADM.users.filter(function(x){return x.name===u;})[0];rb.set(fbDb.collection('keys').doc(rk),keyDoc('reset',u,0,ux&&ux.p&&ux.p.expiresAt?ux.p.expiresAt:null));
     rb.commit().then(function(){showKey(rk,'reset',u);ADM.loaded=false;admLoad();}).catch(admFail);return;
   }
-  if(a==='renew'){ADM.renew={uid:uid,u:u};$('mdBox').innerHTML='<h2>Renovar acesso</h2><p style="color:#5D6B82">Novo prazo para <b>'+esc(u)+'</b>, contado a partir de agora.</p><div class="row"><button class="btn y" type="button" data-adm="renewgo" data-days="7">7 dias</button><button class="btn y" type="button" data-adm="renewgo" data-days="30">30 dias</button><button class="btn o" type="button" data-adm="renewgo" data-days="0">Permanente</button><button class="btn o" id="mNo" type="button">Cancelar</button></div>';$('md').className='modal on';return;}
-  if(a==='renewgo'){var rd=+b.getAttribute('data-days')||0,rv=ADM.renew;if(!rv)return;fbDb.collection('users').doc(rv.uid).update({expiresAt:rd>0?firebase.firestore.Timestamp.fromDate(new Date(Date.now()+rd*864e5)):firebase.firestore.FieldValue.delete()}).then(function(){$('md').className='modal';toast('Acesso renovado: '+durLabel(rd).toLowerCase());ADM.loaded=false;admLoad();}).catch(admFail);return;}
+  if(a==='renew'){ADM.renew={uid:uid,u:u};$('mdBox').innerHTML='<h2>Renovar key</h2><p style="color:#5D6B82">'+esc(u)+' continua com a mesma key e não perde nenhum dado. O tempo escolhido é somado ao que ainda resta; se já expirou, conta a partir de agora.</p><div class="row"><button class="btn y" type="button" data-adm="renewgo" data-days="7">7 dias</button><button class="btn y" type="button" data-adm="renewgo" data-days="30">30 dias</button><button class="btn o" type="button" data-adm="renewgo" data-days="0">Permanente</button><button class="btn o" id="mNo" type="button">Cancelar</button></div>';$('md').className='modal on';return;}
+  if(a==='renewgo'){var rd=+b.getAttribute('data-days')||0,rv=ADM.renew;if(!rv)return;var rx=ADM.users.filter(function(x){return x.uid===rv.uid;})[0],re=rx&&expDate(rx.p),rbase=(re&&re.getTime()>Date.now())?re.getTime():Date.now();fbDb.collection('users').doc(rv.uid).update({expiresAt:rd>0?firebase.firestore.Timestamp.fromDate(new Date(rbase+rd*864e5)):firebase.firestore.FieldValue.delete()}).then(function(){$('md').className='modal';toast(rd>0?'Key renovada: +'+durLabel(rd).toLowerCase():'Key renovada: permanente');ADM.loaded=false;admLoad();}).catch(admFail);return;}
   if(a==='deluser'){
     if(!confirm('Excluir "'+u+'"?\n\nA conta e TODOS os dados dessa pessoa serão apagados. Não dá para desfazer.'))return;
     var db=fbDb.batch(),ver=+b.getAttribute('data-ver')||0;
@@ -873,7 +883,7 @@ function openAuthModal(){
     $('mdBox').innerHTML='<h2>Login</h2><p style="color:#5D6B82">O login ainda não está ativado neste arquivo. Para ativar, crie um projeto gratuito no Firebase e cole o firebaseConfig no começo do script. O passo a passo está nos comentários no topo do arquivo HTML.</p><div class="row"><button class="btn o" id="mNo" type="button">Fechar</button></div>';
   }else if(logged()){
     var st=SYNC==='busy'?'⏳ sincronizando…':SYNC==='err'?'⚠️ erro ao sincronizar (suas alterações ficam neste aparelho até conseguir)'+(SYNCERR?'<br><small style="color:#D7263D">Detalhe: '+esc(SYNCERR)+'</small>':''):A.dirty?'⏳ alterações pendentes':'☁️ tudo sincronizado';
-    $('mdBox').innerHTML='<h2>Sua conta</h2><p style="color:#5D6B82">Conectado como <b>'+esc(A.owner)+'</b>'+(isAdm()?' <span class="badge a">Admin</span>':'')+'. Suas contas ficam salvas na nuvem e aparecem em qualquer aparelho em que você entrar.</p><p>'+st+'</p><div class="row"><button class="btn y" id="syncNow" type="button">Sincronizar agora</button><button class="btn o" id="pwChg" type="button">Alterar senha</button>'+(window.pwaCan&&window.pwaCan()?'<button class="btn y" id="pwaInst" type="button">📲 Instalar app</button>':'')+'<button class="btn r" id="lgOut" type="button">Sair</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
+    $('mdBox').innerHTML='<h2>Sua conta</h2><p style="color:#5D6B82">Conectado como <b>'+esc(A.owner)+'</b>'+(isAdm()?' <span class="badge a">Admin</span>':'')+'. Suas contas ficam salvas na nuvem e aparecem em qualquer aparelho em que você entrar.</p>'+accessHtml()+'<p>'+st+'</p><div class="row"><button class="btn y" id="syncNow" type="button">Sincronizar agora</button><button class="btn o" id="pwChg" type="button">Alterar senha</button>'+(window.pwaCan&&window.pwaCan()?'<button class="btn y" id="pwaInst" type="button">📲 Instalar app</button>':'')+'<button class="btn r" id="lgOut" type="button">Sair</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
   }else{showGate('in');return;}
   $('md').className='modal on';
 }
@@ -1956,6 +1966,7 @@ document.addEventListener('click',function(e){
   if(b.id==='lgGoRec'){showGate('rec');return;}
   if(b.id==='lgBack'){showGate('in');return;}
   if(b.id==='pwChg'){openPwModal();return;}
+  if(b.id==='admDm'){$('md').className='modal';var tb=document.querySelector('[data-tab="trade"]');if(tb)tb.click();setTimeout(function(){tOpenDm(ADMIN_USER);},50);return;}
   if(b.id==='pwaInst'){$('md').className='modal';window.pwaInstall();return;}
   if(b.id==='pwGo'){doPw();return;}
   if(b.hasAttribute('data-adm')){admAct(b);return;}
