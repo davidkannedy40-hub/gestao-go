@@ -488,8 +488,8 @@ function seedMons(){
 }
 function defaults(){
   var a=[];
-  for(var i=0;i<13;i++) a.push({id:'a'+(i+1),name:i===0?'Principal':'Conta '+(i+1),nick:'',code:'',note:'',color:COLORS[i],mons:[]});
-  return {v:3,accounts:a};
+  for(var i=0;i<2;i++) a.push({id:'a'+(i+1),name:i===0?'Principal':'Conta '+(i+1),nick:'',code:'',note:'',color:COLORS[i],mons:[]});
+  return {v:3,accounts:a,sel:[]};
 }
 function fkName(n){var r=(n||'').match(/ de (Alola|Hisui|Galar|Paldea)$/);return r?r[1].toLowerCase():'';}
 function migrate(d){((d&&d.accounts)||[]).forEach(function(a){(a.mons||[]).forEach(function(m){if(m.fk==null)m.fk=fkName(m.name);});});return d;}
@@ -537,7 +537,7 @@ if(CLOUD){
     authReady=new Promise(function(res){var un=fbAuth.onAuthStateChanged(function(){un();res();});});
   }catch(e){CLOUD=false;}
 }
-function loadAuth(){var a=null;try{a=JSON.parse(localStorage.getItem(LSA)||'null');}catch(e){}a=a||{};return {owner:a.owner||'',session:a.session||null,cloudTs:a.cloudTs||'',dirty:!!a.dirty,skip:!!a.skip};}
+function loadAuth(){var a=null;try{a=JSON.parse(localStorage.getItem(LSA)||'null');}catch(e){}a=a||{};return {owner:a.owner||'',session:a.session||null,cloudTs:a.cloudTs||'',dirty:!!a.dirty,skip:!!a.skip,lim:a.lim||null};}
 function saveAuth(){try{localStorage.setItem(LSA,JSON.stringify(A));}catch(e){}}
 function logged(){return CLOUD&&!!A.session;}
 function mailOf(u,v){return v?u+'@v'+v+'.gestaogo.app':u+'@gestaogo.app';}
@@ -691,7 +691,7 @@ function cleanU(s){return norm(s||'').replace(/[^a-z0-9._-]/g,'').slice(0,20);}
 function normKey(s){var c=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return c.replace(/(.{4})(?=.)/g,'$1-');}
 function newKey(){var al='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',b=new Uint8Array(20),s='',i;crypto.getRandomValues(b);for(i=0;i<20;i++)s+=al.charAt(b[i]%32);return s.replace(/(.{4})(?=.)/g,'$1-');}
 function cloudRef(){return fbDb.collection('gestao').doc(UN);}
-function navRole(){var n=$('navAdm');if(n)n.hidden=!isAdm();}
+function navRole(){setLim();var n=$('navAdm');if(n)n.hidden=!isAdm();}
 function expDate(p){var e=p&&p.expiresAt;return e?(e.toDate?e.toDate():new Date(e)):null;}
 function isExpired(p){var d=expDate(p);return !!d&&p.role!=='admin'&&d.getTime()<=Date.now();}
 function durLabel(n){return n===7?'7 dias':n===30?'30 dias':'Permanente';}
@@ -701,9 +701,71 @@ function accessHtml(){
   var d=expDate(PROFILE);
   if(!d)return '<p>🔑 Sua key: <b>acesso permanente</b></p>';
   var ms=d.getTime()-Date.now(),ca=new Date(PROFILE.createdAt).getTime(),trial=!PROFILE.key&&Math.abs(d.getTime()-ca-7*864e5)<36e5;
-  if(ms<=0)return '<div style="margin:8px 0;padding:10px 12px;border-radius:12px;background:#FDE2E4"><p style="margin:0">'+(trial?'⏰ Seu teste grátis de 7 dias acabou.':'🔑 Seu acesso expirou em <b>'+esc(fmtDay(d))+'</b>.')+'</p><p style="margin:6px 0 0;color:#5D6B82">Você continua usando suas contas normalmente, mas não consegue mais abrir os outros jogadores na Janela de Troca. Para voltar, peça uma key ao administrador (<b>'+esc(ADMIN_USER)+'</b>).</p></div>';
+  if(ms<=0)return '<div style="margin:8px 0;padding:10px 12px;border-radius:12px;background:#FDE2E4"><p style="margin:0">'+(trial?'⏰ Seu teste grátis de 7 dias acabou.':'🔑 Seu acesso expirou em <b>'+esc(fmtDay(d))+'</b>.')+'</p><p style="margin:6px 0 0;color:#5D6B82">Você continua usando '+FREE_ACC+' contas (você escolhe quais), mas não consegue mais abrir os outros jogadores na Janela de Troca. Para liberar tudo de novo, peça uma key ao administrador (<b>'+esc(ADMIN_USER)+'</b>).</p></div>';
   var n=Math.ceil(ms/864e5),w=n<=7;
-  return '<div style="margin:8px 0;padding:10px 12px;border-radius:12px;background:'+(w?'#FFF3E0':'#EAF6EE')+'"><p style="margin:0">'+(trial?'🎁 Teste grátis até <b>':'🔑 Seu acesso vale até <b>')+esc(fmtDay(d))+'</b> ('+(n<=0?'vence hoje':n===1?'falta 1 dia':'faltam '+n+' dias')+').</p><p style="margin:6px 0 8px;color:#5D6B82">Depois dessa data você continua usando suas contas, mas não consegue mais abrir os outros jogadores na Janela de Troca. Para renovar sem perder seus dados, chame o administrador.</p><button class="btn y s" id="admDm" type="button">💬 Falar com o admin para renovar</button></div>';
+  return '<div style="margin:8px 0;padding:10px 12px;border-radius:12px;background:'+(w?'#FFF3E0':'#EAF6EE')+'"><p style="margin:0">'+(trial?'🎁 Teste grátis até <b>':'🔑 Seu acesso vale até <b>')+esc(fmtDay(d))+'</b> ('+(n<=0?'vence hoje':n===1?'falta 1 dia':'faltam '+n+' dias')+').</p><p style="margin:6px 0 8px;color:#5D6B82">Depois dessa data todas as contas bloqueiam e você escolhe só '+FREE_ACC+' para continuar usando; a Janela de Troca também fecha. Para renovar sem perder seus dados, chame o administrador.</p><button class="btn y s" id="admDm" type="button">💬 Falar com o admin para renovar</button></div>';
+}
+
+/* ---------- Limite de contas: 2 grátis; a Key libera mais ---------- */
+var FREE_ACC=2,PK=[],PKSHOWN=false;
+function isTrial(p){var d=expDate(p);return !!d&&!p.key&&Math.abs(d.getTime()-new Date(p.createdAt).getTime()-7*864e5)<36e5;}
+function keyActive(p){
+  if(!p)return false;if(p.role==='admin')return true;
+  var d=expDate(p);if(!d)return true;
+  return d.getTime()>Date.now()&&!isTrial(p);
+}
+function setLim(){
+  if(PROFILE){var d=expDate(PROFILE);A.lim={k:keyActive(PROFILE)?1:0,e:(d&&PROFILE.role!=='admin')?d.getTime():0};saveAuth();}
+  else if(!logged()&&A.lim){A.lim=null;saveAuth();}
+}
+function keyOn(){
+  if(!CLOUD)return true;
+  if(PROFILE)return keyActive(PROFILE);
+  if(A.lim)return !!A.lim.k&&(!A.lim.e||A.lim.e>Date.now());
+  return logged();
+}
+function selIds(){return (D.sel||[]).filter(function(id){return !!acc(id);}).slice(0,FREE_ACC);}
+function limited(){return CLOUD&&!keyOn()&&D.accounts.length>FREE_ACC;}
+function isLocked(a){return limited()&&selIds().indexOf(a.id)<0;}
+function AC(){return D.accounts.filter(function(a){return !isLocked(a);});}
+function canAdd(){return keyOn()||D.accounts.length<FREE_ACC;}
+function enforce(){
+  if(!CLOUD)return;
+  if(keyOn()){if(D.sel&&D.sel.length){D.sel=[];save();}return;}
+  var s=selIds();
+  if(D.accounts.length>FREE_ACC&&!s.length){
+    var used=D.accounts.filter(function(a){return a.mons.length||a.nick||a.code||a.note;});
+    if(used.length<=FREE_ACC){
+      s=used.map(function(a){return a.id;});
+      D.accounts.forEach(function(a){if(s.length<FREE_ACC&&s.indexOf(a.id)<0)s.push(a.id);});
+      D.sel=s;save();return;
+    }
+  }
+  if((D.sel||[]).length!==s.length){D.sel=s;save();}
+}
+function upsellH(why){
+  return '<h2>🔑 Limite de '+FREE_ACC+' contas</h2><p style="color:#5D6B82">'+why+'</p><p style="color:#5D6B82">Com uma <b>Key</b> você libera mais contas. Quando a Key terminar, todas as contas ficam bloqueadas e você escolhe '+FREE_ACC+' para continuar usando. Seus dados nunca são apagados.</p><div class="row"><button class="btn y" id="admDm" type="button">💬 Falar com o admin para comprar Key</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
+}
+function openUpsell(why){$('mdBox').innerHTML=upsellH(why);$('md').className='modal on';}
+function pickH(){
+  var need=Math.min(FREE_ACC,D.accounts.length);
+  var h='<h2>🔒 Escolha '+need+' contas</h2><p style="color:#5D6B82">Sem Key ativa só dá para usar '+FREE_ACC+' contas. As outras ficam bloqueadas (os dados ficam guardados) e voltam a funcionar se você ativar uma Key. Escolha quais manter:</p>';
+  D.accounts.forEach(function(a){var on=PK.indexOf(a.id)>=0;
+    h+='<button type="button" class="btn '+(on?'y':'o')+'" data-pk="'+a.id+'" style="width:100%;margin:4px 0;text-align:left">'+(on?'✅ ':'⬜ ')+esc(a.name)+' · '+a.mons.length+' Pokémon</button>';});
+  return h+'<div class="row" style="margin-top:14px"><button class="btn y" id="pkOk" type="button"'+(PK.length===need?'':' disabled')+'>Confirmar ('+PK.length+'/'+need+')</button><button class="btn o" id="mNo" type="button">Depois</button></div>';
+}
+function openPick(){PK=selIds().slice();$('mdBox').innerHTML=pickH();$('md').className='modal on';}
+function limBanner(){
+  if(!CLOUD||keyOn())return '';
+  if(limited()&&!selIds().length)return '<div style="margin:0 0 12px;padding:10px 12px;border-radius:12px;background:#FDE2E4"><p style="margin:0">🔒 Suas contas estão bloqueadas. Escolha '+FREE_ACC+' para continuar usando.</p><div class="row" style="margin-top:8px"><button class="btn y s" type="button" data-pick="1">Escolher contas</button><button class="btn o s" type="button" data-upsell="1">🔑 Ter uma Key</button></div></div>';
+  return '<div style="margin:0 0 12px;padding:10px 12px;border-radius:12px;background:#FFF3E0"><p style="margin:0">Plano grátis: até '+FREE_ACC+' contas. Uma <b>Key</b> libera mais.</p><div class="row" style="margin-top:8px"><button class="btn o s" type="button" data-upsell="1">🔑 Ter uma Key</button></div></div>';
+}
+function lockedCard(a){
+  return '<button type="button" class="ac" data-lockacc="1" style="--c:#9AA5B1;opacity:.65"><div class="n">🔒 '+esc(a.name)+'</div><div class="nk">Bloqueada</div><div class="nums"><span class="pill">'+a.mons.length+' Pokémon</span></div></button>';
+}
+function lockedClick(){
+  if(limited()&&!selIds().length)openPick();
+  else openUpsell('Esta conta está bloqueada porque você não tem uma Key ativa.');
 }
 function unlock(x){LOCK=false;return x;}
 function loadProfile(uid){return fbDb.collection('users').doc(uid).get().then(function(s){PROFILE=s.exists?s.data():null;navRole();return PROFILE;});}
@@ -945,11 +1007,12 @@ function renderPh(){
 /* ---------- Home ---------- */
 function renderHome(){
   var tot=0,sh=0,uniq={};
-  D.accounts.forEach(function(a){a.mons.forEach(function(m){tot++;if(m.sh==='y'){sh++;uniq[m.name]=1;}});});
-  var h='<div class="row" style="margin-bottom:12px"><button type="button" class="btn y" data-import="">📋 Importar lista de Pokémon</button><button type="button" class="btn y" data-newacc="1">➕ Nova conta</button></div><div class="stats"><div class="stat"><b>'+tot+'</b><span>Pokémon no total</span></div>'+
+  AC().forEach(function(a){a.mons.forEach(function(m){tot++;if(m.sh==='y'){sh++;uniq[m.name]=1;}});});
+  var h=limBanner()+'<div class="row" style="margin-bottom:12px"><button type="button" class="btn y" data-import="">📋 Importar lista de Pokémon</button><button type="button" class="btn y" data-newacc="1">➕ Nova conta</button></div><div class="stats"><div class="stat"><b>'+tot+'</b><span>Pokémon no total</span></div>'+
     '<div class="stat"><b>'+sh+'</b><span>✨ Brilhantes</span></div>'+
     '<button type="button" class="stat" data-uniq="1" style="text-align:left;cursor:pointer"><b>'+Object.keys(uniq).length+'</b><span>✨ Espécies diferentes · ver ›</span></button></div><div class="accgrid">';
   D.accounts.forEach(function(a){
+    if(isLocked(a)){h+=lockedCard(a);return;}
     var y=count(a,function(m){return m.sh==='y';}),p=count(a,function(m){return m.sh==='p';});
     var s=count(a,function(m){return m.t.indexOf('S')>=0;}),l=count(a,function(m){return m.t.indexOf('L')>=0;});
     var mg=count(a,function(m){return kindOf(m.fk)==='mega';}),gx=count(a,function(m){return kindOf(m.fk)==='gmax';}),dn=count(a,function(m){return m.t.indexOf('D')>=0||m.fk==='dmax';});
@@ -1052,7 +1115,7 @@ function toggleSh(aid,mid){
 /* ---------- Gestão geral ---------- */
 var G={q:'',f:[],acc:'all',mode:'list'};
 function renderAll(){
-  var opts=D.accounts.map(function(a){return '<option value="'+a.id+'">'+esc(a.name)+'</option>';}).join('');
+  var opts=AC().map(function(a){return '<option value="'+a.id+'">'+esc(a.name)+'</option>';}).join('');
   $('v-all').innerHTML='<div class="bar"><h2>Gestão geral</h2></div><div class="tools"><input class="in" id="gq" type="search" placeholder="Buscar nome, número ou anotação" value="'+esc(G.q)+'"><select class="in" id="gacc"><option value="all">Todas as contas</option>'+opts+'</select></div>'+
    '<div class="chips" role="group" aria-label="Filtro">'+chipsH('data-gf',G.f)+'</div>'+opH()+
    '<div class="chips" style="margin-top:8px" role="group" aria-label="Modo"><button type="button" class="chip" data-gmode="list" aria-pressed="'+(G.mode==='list')+'">Todos os Pokémon</button><button type="button" class="chip" data-gmode="sp" aria-pressed="'+(G.mode==='sp')+'">Por espécie</button></div>'+
@@ -1062,7 +1125,7 @@ function renderAll(){
 function drawAll(){
   var box=$('glist'); if(!box)return;
   var q=norm(G.q),list=[];
-  D.accounts.forEach(function(a){
+  AC().forEach(function(a){
     if(G.acc!=='all'&&a.id!==G.acc)return;
     a.mons.forEach(function(m){if(passes(m,G.f)&&matchQ(m,q))list.push({a:a,m:m});});
   });
@@ -1261,7 +1324,7 @@ function refreshForms(){var sl=$('mForm');if(!sl)return;sl.innerHTML=formOpts();
 function nk(s){return norm(s).replace(/[^a-z0-9]/g,'');}
 function openImport(accId){
   IMP=[];
-  var sel=D.accounts.map(function(a){return '<option value="'+a.id+'"'+(a.id===accId?' selected':'')+'>'+esc(a.name)+'</option>';}).join('');
+  var sel=AC().map(function(a){return '<option value="'+a.id+'"'+(a.id===accId?' selected':'')+'>'+esc(a.name)+'</option>';}).join('');
   $('mdBox').innerHTML='<h2>Importar lista</h2><p style="margin:0 0 6px;color:#5D6B82;font-size:14px">Cole a lista em texto, um Pokémon por linha (pode ter número, ✨, sombrio, sortudo, chapéu, óculos, fêmea/macho, "x2"). O que eu não reconheço do nome vira anotação ou aviso.</p>'+
    '<label for="iAcc">Adicionar na conta</label><select class="in" id="iAcc">'+sel+'</select>'+
    '<label for="iTxt">Lista</label><textarea class="in" id="iTxt" style="min-height:150px" placeholder="1. Bulbasaur — chapéu de festa&#10;Charizard x2 — sombrio&#10;Pikachu — fêmea · fundo especial"></textarea>'+
@@ -1362,7 +1425,7 @@ function drawWho(){
   if(!q){box.innerHTML='<div class="empty">Comece a digitar para buscar.</div>';return;}
   var tagHit=null; Object.keys(FLAGS).forEach(function(k){if(norm(FLAGS[k][1]).indexOf(q)===0)tagHit=k;});
   var g={},order=[];
-  D.accounts.forEach(function(a){a.mons.forEach(function(m){
+  AC().forEach(function(a){a.mons.forEach(function(m){
     var ok=matchQ(m,q)||(tagHit&&m.t.indexOf(tagHit)>=0);
     if(!ok)return;
     var k=m.name; if(!g[k]){g[k]={m:m,items:[]};order.push(k);}
@@ -1379,7 +1442,7 @@ function drawWho(){
 function renderBkp(){
   $('v-bkp').innerHTML='<div class="panel"><h3>Salvar backup</h3><p>Sem login, seus dados ficam só neste navegador; com login, também ficam na nuvem. O backup guarda a lista, mas não as fotos.</p><div class="row"><button class="btn y" id="bkDown" type="button">Baixar backup (.json)</button><button class="btn o" id="bkCopy" type="button">Copiar como texto</button></div></div>'+
    '<div class="panel"><h3>Restaurar backup</h3><p>Escolha o arquivo ou cole o texto. Isso substitui tudo que está no app agora.</p><div class="row"><button class="btn o" id="bkFile" type="button">Escolher arquivo</button></div><textarea class="in" id="bkTxt" placeholder="Cole aqui o backup" style="margin-top:8px"></textarea><div class="row" style="margin-top:8px"><button class="btn" id="bkImp" type="button">Restaurar do texto</button></div></div>'+
-   (D.accounts[0].mons.length?'':'<div class="panel"><h3>Lista inicial</h3><p>Carrega os 145 Pokémon Shine da conta Principal.</p><button class="btn y" id="bkSeed" type="button">Carregar lista inicial</button></div>')+'<div class="panel"><h3>Recomeçar</h3><p>Volta ao início: 13 contas vazias.</p><button class="btn r" id="bkReset" type="button">Apagar tudo e recomeçar</button></div><input type="file" id="bkIn" accept=".json,application/json" hidden>';
+   (D.accounts[0].mons.length?'':'<div class="panel"><h3>Lista inicial</h3><p>Carrega os 145 Pokémon Shine da conta Principal.</p><button class="btn y" id="bkSeed" type="button">Carregar lista inicial</button></div>')+'<div class="panel"><h3>Recomeçar</h3><p>Volta ao início: 2 contas vazias.</p><button class="btn r" id="bkReset" type="button">Apagar tudo e recomeçar</button></div><input type="file" id="bkIn" accept=".json,application/json" hidden>';
 }
 function importData(txt){
   try{var d=JSON.parse(txt); if(!d||!d.accounts||!d.accounts.length)throw 0;
@@ -1390,6 +1453,7 @@ function importData(txt){
 /* ---------- Modal de Pokémon ---------- */
 var M={acc:null,mon:null,dex:0,name:'',sp:0,sh:'y',t:'',note:''};
 function openMon(accId,monId){
+  var lk=acc(accId);if(lk&&isLocked(lk)){toast('Conta bloqueada 🔒');return;}
   var a=acc(accId),m=monId?a.mons.filter(function(x){return x.id===monId;})[0]:null;
   M={acc:accId,mon:monId,dex:m?m.dex:0,name:m?m.name:'',fk:m?(m.fk||''):'',sp:m?m.sp:0,sh:m?m.sh:'y',t:m?m.t:'',note:m?m.note:'',file:null,rm:false,ph:m?(m.ph||''):'',q:m?(m.q||1):1};
   M.cs=csGet(M.note);M.note=csSet(M.note,'');M.bg=bgGet(M.note);M.note=bgSet(M.note,'');
@@ -1409,7 +1473,7 @@ function drawModal(){
    '<label>Detalhes</label><div class="chips" id="mFlags">'+chips+'</div>'+
    '<label for="mNote">Anotação (item, data, fundo...)</label><input class="in" id="mNote" maxlength="120" value="'+esc(M.note)+'">'+
    '<label>Foto original</label><div id="phBox"></div><input type="file" id="mFile" accept="image/*" hidden>';
-  if(M.mon){h+='<label for="mAcc">Conta</label><select class="in" id="mAcc">'+D.accounts.map(function(a){return '<option value="'+a.id+'"'+(a.id===M.acc?' selected':'')+'>'+esc(a.name)+'</option>';}).join('')+'</select>';}
+  if(M.mon){h+='<label for="mAcc">Conta</label><select class="in" id="mAcc">'+AC().map(function(a){return '<option value="'+a.id+'"'+(a.id===M.acc?' selected':'')+'>'+esc(a.name)+'</option>';}).join('')+'</select>';}
   h+='<div class="row" style="margin-top:14px"><button class="btn y" id="mSave" type="button">Salvar</button>'+(M.mon?'':'<button class="btn o" id="mMore" type="button">Salvar e adicionar outro</button>')+'<button class="btn o" id="mNo" type="button">Cancelar</button>'+(M.mon?'<button class="btn r" id="mDel" type="button">Excluir</button>':'')+'</div>';
   $('mdBox').innerHTML=h;renderPh();
 }
@@ -1470,6 +1534,7 @@ function newAccH(){
    '<div class="row" style="margin-top:14px"><button class="btn y" id="naSave" type="button">Adicionar conta</button><button class="btn o" id="mNo" type="button">Cancelar</button></div>';
 }
 function openNewAcc(){
+  if(!canAdd()){openUpsell(limited()?'Suas contas estão bloqueadas porque você não tem uma Key ativa.':'Você já está com '+FREE_ACC+' contas e não dá para adicionar mais sem uma Key.');return;}
   NA={color:COLORS[D.accounts.length%COLORS.length],name:'Conta '+(D.accounts.length+1),nick:'',code:'',note:''};
   $('mdBox').innerHTML=newAccH();
   $('md').className='modal on';
@@ -1762,7 +1827,7 @@ function tMine(){
 }
 function tMineList(){
   var q=norm(($('tmq')||{}).value||'').trim(),out=[];
-  D.accounts.forEach(function(a){a.mons.forEach(function(m){if(out.length<80&&(!q||norm(m.name).indexOf(q)>=0||String(m.dex)===q))out.push([a,m]);});});
+  AC().forEach(function(a){a.mons.forEach(function(m){if(out.length<80&&(!q||norm(m.name).indexOf(q)>=0||String(m.dex)===q))out.push([a,m]);});});
   $('tml').innerHTML=out.length?out.map(function(e){var m=e[1];return '<button type="button" data-t="mpick" data-tp="'+e[0].id+'|'+m.id+'">'+img(m)+'<span>'+esc(m.name)+' '+badges(m)+' <span style="color:#5D6B82;font-size:12px">'+esc(e[0].name)+(m.note?' · '+esc(m.note):'')+'</span></span></button>';}).join(''):'<div class="empty">Nada encontrado.</div>';
 }
 function tMinePick(p){
@@ -1955,6 +2020,7 @@ function admRepHtml(){
 
 /* ---------- Navegação ---------- */
 function show(tab,accId){
+  if(tab==='acc'&&accId){var la=acc(accId);if(!la||isLocked(la)){toast('Conta bloqueada 🔒');tab='home';accId=null;}}
   if(tab==='adm'&&!isAdm())tab='home';V.tab=tab;if(tab!=='trade')tStop(); if(accId){V.acc=accId;V.f=[];V.q='';V.mode='list';}
   var key=tab==='home'&&false?'':tab;
   ['home','acc','all','who','bkp','adm','trade'].forEach(function(x){$('v-'+x).className='view'+(x===tab?' on':'');});
@@ -1964,8 +2030,10 @@ function show(tab,accId){
   draw(); window.scrollTo(0,0);
 }
 function draw(){
-  var t=0;D.accounts.forEach(function(a){t+=a.mons.length;});
-  $('sub').textContent=D.accounts.length+' contas · '+t+' Pokémon registrados';
+  enforce();
+  var t=0;AC().forEach(function(a){t+=a.mons.length;});
+  $('sub').textContent=AC().length+' contas · '+t+' Pokémon registrados'+(limited()?' · '+(D.accounts.length-AC().length)+' 🔒':'');
+  if(limited()&&!selIds().length&&!PKSHOWN&&$('md').className.indexOf('on')<0){PKSHOWN=true;setTimeout(openPick,0);}
   if(V.tab==='home')renderHome();else if(V.tab==='acc')renderAcc();else if(V.tab==='all')renderAll();else if(V.tab==='who')renderWho();else if(V.tab==='adm')renderAdm();else if(V.tab==='trade')renderTrade();else renderBkp();
 }
 
@@ -1990,9 +2058,15 @@ document.addEventListener('click',function(e){
   if(b.hasAttribute('data-ncolor')){naKeep();NA.color=b.getAttribute('data-ncolor');$('mdBox').innerHTML=newAccH();return;}
   if(b.id==='naSave'){
     naKeep();
+    if(!canAdd()){$('md').className='modal';openUpsell('Você já está com '+FREE_ACC+' contas e não dá para adicionar mais sem uma Key.');return;}
     var nn=(NA.name||'').trim()||('Conta '+(D.accounts.length+1));
     var na={id:'a'+uid(),name:nn,nick:(NA.nick||'').trim(),code:(NA.code||'').trim(),note:(NA.note||'').trim(),color:NA.color||COLORS[0],mons:[]};
     D.accounts.push(na);save();$('md').className='modal';toast('Conta adicionada');draw();return;}
+  if(b.hasAttribute('data-lockacc')){lockedClick();return;}
+  if(b.hasAttribute('data-pick')){openPick();return;}
+  if(b.hasAttribute('data-upsell')){openUpsell('Você está no plano grátis, com limite de '+FREE_ACC+' contas.');return;}
+  if(b.hasAttribute('data-pk')){var pid=b.getAttribute('data-pk'),px=PK.indexOf(pid),pn=Math.min(FREE_ACC,D.accounts.length);if(px>=0)PK.splice(px,1);else if(PK.length<pn)PK.push(pid);else{toast('Só dá para escolher '+pn);return;}$('mdBox').innerHTML=pickH();return;}
+  if(b.id==='pkOk'){if(PK.length!==Math.min(FREE_ACC,D.accounts.length))return;D.sel=PK.slice();save();$('md').className='modal';toast('Contas escolhidas ✅');draw();return;}
   if(b.id==='fab'){openMon(V.acc,null);return;}
   if(b.hasAttribute('data-mon')){openMon(V.acc,b.getAttribute('data-mon'));return;}
   if(b.hasAttribute('data-f')){togF(V.f,b.getAttribute('data-f'));syncChips('data-f',V.f);drawList();return;}
@@ -2019,7 +2093,7 @@ document.addEventListener('click',function(e){
   if(b.id==='lgOut'){doLogout();return;}
   if(b.id==='phPick'){$('mFile').click();return;}
   if(b.id==='phRm'){M.file=null;M.rm=true;renderPh();return;}
-  if(b.id==='bkSeed'){var pa=D.accounts[0];if(pa.mons.length&&!confirm('A conta "'+pa.name+'" já tem Pokémon. Adicionar a lista inicial mesmo assim?'))return;seedMons().forEach(function(m){pa.mons.push(m);});save();toast('Lista inicial carregada');draw();return;}
+  if(b.id==='bkSeed'){var pa=AC()[0];if(!pa){toast('Nenhuma conta liberada');return;}if(pa.mons.length&&!confirm('A conta "'+pa.name+'" já tem Pokémon. Adicionar a lista inicial mesmo assim?'))return;seedMons().forEach(function(m){pa.mons.push(m);});save();toast('Lista inicial carregada');draw();return;}
   if(b.hasAttribute('data-allsh')){var sa=acc(V.acc);if(!sa||!sa.mons.length)return;if(!confirm('Marcar todos os '+sa.mons.length+' Pokémon de "'+sa.name+'" como Shine?'))return;sa.mons.forEach(function(m){m.sh='y';});save();drawList();toast('Todos marcados como ✨ Shine');return;}
   if(b.hasAttribute('data-import')){openImport(b.getAttribute('data-import')||'a1');return;}
   if(b.hasAttribute('data-gf')){togF(G.f,b.getAttribute('data-gf'));syncChips('data-gf',G.f);drawAll();return;}
@@ -2073,7 +2147,7 @@ function cap(n){return n.split('-').map(function(w){return w.charAt(0).toUpperCa
   var c=null;try{c=JSON.parse(localStorage.getItem(LSP)||'null');}catch(e){}
   if(c&&c.length>1000){setSpecies(c);loadForms();return;}
   var seen={},tmp=[];
-  D.accounts.forEach(function(a){a.mons.forEach(function(m){if(m.dex&&!seen[m.dex]){seen[m.dex]=1;tmp.push({id:m.dex,name:m.name.replace(/ de (Alola|Hisui|Galar|Paldea)$/,'')});}});});
+  AC().forEach(function(a){a.mons.forEach(function(m){if(m.dex&&!seen[m.dex]){seen[m.dex]=1;tmp.push({id:m.dex,name:m.name.replace(/ de (Alola|Hisui|Galar|Paldea)$/,'')});}});});
   setSpecies(tmp);
   fetch('https://pokeapi.co/api/v2/pokemon-species?limit=1025').then(function(r){return r.json();}).then(function(d){
     var l=d.results.map(function(r){return {id:+r.url.replace(/\/$/,'').split('/').pop(),name:cap(r.name)};}).sort(function(a,b){return a.id-b.id;});
