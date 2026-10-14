@@ -390,7 +390,7 @@ nav button[hidden]{display:none}
 .comp textarea{flex:1;min-height:44px;max-height:100px;resize:none}
 .pend{display:flex;align-items:center;gap:8px;margin-top:8px}
 .pend img{max-height:70px;border-radius:8px}
-.tc>img.phimg{width:100%;height:110px;object-fit:cover;border-radius:10px;image-rendering:auto;cursor:zoom-in;background:#E3EBF1}
+.tc>img.phimg{width:100%;height:auto;max-height:320px;object-fit:contain;border-radius:10px;image-rendering:auto;cursor:zoom-in;background:#E3EBF1}
 .fdet{padding:10px 14px;margin:10px 0}.fdet summary{font-weight:800;cursor:pointer}
 </style>
 </head>
@@ -809,8 +809,8 @@ function renderAdm(){
   if(ADM.err)h+='<div class="panel"><p style="color:#D7263D">'+esc(ADM.err)+'</p></div>';
   if(ADM.busy&&!ADM.loaded)h+='<div class="empty">Carregando…</div>';
   var free=ADM.keys.filter(function(k){return !k.used;}),used=ADM.keys.filter(function(k){return k.used;});
-  h+='<div class="panel"><h3>🔑 Chaves de cadastro</h3><p>Escolha por quanto tempo a conta fica ativa depois de criada. Cada chave cria uma única conta e depois deixa de valer. Não há limite de chaves.</p><div class="row"><button class="btn y" type="button" data-adm="genkey" data-days="7">🔑 7 dias</button><button class="btn y" type="button" data-adm="genkey" data-days="30">🔑 30 dias</button><button class="btn o" type="button" data-adm="genkey" data-days="0">🔑 Permanente</button></div><div class="row" style="margin-top:8px"><button class="btn y" type="button" data-adm="genmany" data-days="30" data-n="30">🔑 Gerar 30 chaves de 30 dias</button></div>';
-  if(free.length){h+='<div style="margin-top:10px"><b>Disponíveis ('+free.length+')</b></div>';free.forEach(function(k){
+  h+='<div class="panel"><h3>🔑 Chaves de cadastro</h3><p>Escolha por quanto tempo a conta fica ativa depois de criada. Cada chave cria uma única conta e depois deixa de valer. Não há limite de chaves.</p><div class="row"><button class="btn y" type="button" data-adm="genkey" data-days="7">🔑 7 dias</button><button class="btn y" type="button" data-adm="genkey" data-days="30">🔑 30 dias</button><button class="btn o" type="button" data-adm="genkey" data-days="0">🔑 Permanente</button></div><div class="row" style="margin-top:8px;align-items:center"><label for="gmN" style="margin:0">Quantas?</label><input class="in" id="gmN" type="number" inputmode="numeric" min="1" max="100" value="10" style="width:84px"><select class="in" id="gmD" style="width:auto"><option value="7">7 dias</option><option value="30" selected>30 dias</option><option value="0">Permanente</option></select><button class="btn y" type="button" data-adm="genmany">🔑 Gerar várias</button></div>';
+  if(free.length){h+='<div style="margin-top:10px"><b>Disponíveis ('+free.length+')</b> <button class="btn o s" type="button" data-adm="copyfree">Copiar todas</button></div>';free.forEach(function(k){
     h+='<div class="krow"><code>'+esc(k.id)+'</code><span class="badge'+(k.type==='reset'?' w':'')+'">'+(k.type==='reset'?'Recuperação: '+esc(k.username||''):'Cadastro · '+durLabel(k.days))+'</span><button class="btn o s" type="button" data-adm="copy" data-k="'+esc(k.id)+'">Copiar</button><button class="btn r s" type="button" data-adm="delkey" data-k="'+esc(k.id)+'">Revogar</button></div>';});}
   else if(ADM.loaded)h+='<p class="lg" style="margin-top:10px">Nenhuma chave disponível no momento.</p>';
   if(used.length){h+='<div style="margin-top:12px"><b>Já usadas ('+used.length+')</b></div>';used.forEach(function(k){
@@ -839,8 +839,9 @@ function admAct(b){
   if(a==='repdel'){var rp=b.getAttribute('data-p'),rid=b.getAttribute('data-id');if(!/^(chatGlobal\/[A-Za-z0-9]+|dms\/[a-z0-9._-]+__[a-z0-9._-]+\/msgs\/[A-Za-z0-9]+|tradeItems\/[A-Za-z0-9]+)$/.test(rp)){toast('Caminho inválido');return;}if(!confirm('Excluir este conteúdo?'))return;var rb=fbDb.batch(),pm=rp.match(/^tradeItems\/(.+)$/);rb.delete(fbDb.doc(rp));if(pm)rb.delete(fbDb.collection('tradePhotos').doc(pm[1]));rb.delete(fbDb.collection('reports').doc(rid));rb.commit().then(function(){toast('Conteúdo excluído');ADM.loaded=false;admLoad();}).catch(admFail);return;}
   if(a==='copy'){copyTxt(k);return;}
   if(a==='genkey'){var nk=newKey(),gd=+b.getAttribute('data-days')||0;fbDb.collection('keys').doc(nk).set(keyDoc('register','',gd)).then(function(){showKey(nk,'register','',gd);ADM.loaded=false;admLoad();}).catch(admFail);return;}
-  if(a==='genmany'){var gn=+b.getAttribute('data-n')||30,gdd=+b.getAttribute('data-days')||30,ks=[],gb=fbDb.batch(),gi;if(!confirm('Gerar '+gn+' chaves de '+durLabel(gdd).toLowerCase()+'?'))return;for(gi=0;gi<gn;gi++){var kk=newKey();ks.push(kk);gb.set(fbDb.collection('keys').doc(kk),keyDoc('register','',gdd));}
+  if(a==='genmany'){var gn=Math.floor(+($('gmN')&&$('gmN').value)||0),gdd=+($('gmD')&&$('gmD').value)||0,ks=[],gb=fbDb.batch(),gi;if(gn<1||gn>100){toast('Escolha de 1 a 100 chaves');return;}if(!confirm('Gerar '+gn+' chaves de '+durLabel(gdd).toLowerCase()+'?'))return;for(gi=0;gi<gn;gi++){var kk=newKey();ks.push(kk);gb.set(fbDb.collection('keys').doc(kk),keyDoc('register','',gdd));}
     gb.commit().then(function(){window.__KS=ks.join('\n');$('mdBox').innerHTML='<h2>'+gn+' chaves · '+esc(durLabel(gdd))+'</h2><p style="color:#5D6B82">Cada chave vale para uma única conta. Copie a lista e cole no grupo (uma por linha).</p><textarea class="in" readonly rows="10" style="font-family:monospace;width:100%">'+esc(window.__KS)+'</textarea><div class="row"><button class="btn y" type="button" data-adm="copyall">Copiar todas</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';$('md').className='modal on';ADM.loaded=false;admLoad();}).catch(admFail);return;}
+  if(a==='copyfree'){copyTxt(ADM.keys.filter(function(x){return !x.used&&x.type!=='reset';}).map(function(x){return x.id;}).join('\n'));return;}
   if(a==='copyall'){copyTxt(window.__KS||'');return;}
   if(a==='delkey'){if(!confirm('Revogar esta chave? Ela deixa de funcionar.'))return;fbDb.collection('keys').doc(k).delete().then(function(){toast('Chave revogada');ADM.loaded=false;admLoad();}).catch(admFail);return;}
   if(a==='reset'){
@@ -1011,7 +1012,7 @@ function drawList(){
   var list=a.mons.filter(function(m){return passes(m)&&matchQ(m,q);}).sort(function(x,y){return x.dex-y.dex||x.name.localeCompare(y.name);});
   if(V.mode==='sp'){
     var g={},order=[];
-    list.forEach(function(m){var o=g[m.name];if(!o){o=g[m.name]={m:m,n:0,y:0};order.push(m.name);}o.n++;if(m.sh==='y'){o.y++;if(o.m.sh!=='y')o.m=m;}});
+    list.forEach(function(m){var o=g[m.name];if(!o){o=g[m.name]={m:m,n:0,y:0};order.push(m.name);}o.n+=(m.q||1);if(m.sh==='y'){o.y++;if(o.m.sh!=='y')o.m=m;}});
     $('alc').textContent=order.length+' espécies diferentes · '+list.length+' Pokémon de '+a.mons.length;
     box.innerHTML=order.length?'<div class="grid">'+order.map(function(k){var o=g[k];
       return '<button type="button" class="mon '+(o.y?'y':'n')+'" data-spf="'+esc(k)+'">'+(o.n>1?'<span class="cnt">×'+o.n+'</span>':'')+img(o.m)+'<div class="nm">'+esc(k)+'</div><div class="dx">#'+('000'+o.m.dex).slice(-3)+'</div></button>';}).join('')+'</div>':'<div class="empty">'+(a.mons.length?'Nada com esse filtro.':'Esta conta ainda está vazia. Toque no + para adicionar.')+'</div>';
@@ -1026,7 +1027,7 @@ function drawList(){
 function monCard(m,a,showAcc){
   return '<div class="mon '+m.sh+'" data-mon="'+m.id+'" data-ac="'+a.id+'" role="button" tabindex="0">'+
     '<button type="button" class="star'+(m.sh==='y'?' on':'')+'" data-tog="'+m.id+'" data-ac="'+a.id+'" aria-pressed="'+(m.sh==='y')+'" aria-label="Alternar brilhante">✨</button>'+
-    img(m)+'<div class="nm">'+esc(m.name)+'</div><div class="dx">#'+('000'+m.dex).slice(-3)+'</div><div class="bd">'+badges(m)+'</div>'+
+    (m.q>1?'<span class="cnt">'+m.q+'X</span>':'')+img(m)+'<div class="nm">'+esc(m.name)+'</div><div class="dx">#'+('000'+m.dex).slice(-3)+'</div><div class="bd">'+badges(m)+'</div>'+
     (showAcc?'<div class="nt"><b style="color:'+a.color+'">●</b> '+esc(a.name)+'</div>':'')+
     (m.note?'<div class="nt">'+esc(m.note)+'</div>':'')+'</div>';
 }
@@ -1060,7 +1061,7 @@ function drawAll(){
   if(!list.length){box.innerHTML='<div class="empty">Nada com esse filtro.</div>';return;}
   if(G.mode==='list'){box.innerHTML='<div class="grid">'+list.map(function(e){return monCard(e.m,e.a,true);}).join('')+'</div>';return;}
   var g={},order=[];
-  list.forEach(function(e){var k=e.m.name;if(!g[k]){g[k]={m:e.m,n:0,by:{},y:0};order.push(k);}var o=g[k];o.n++;if(e.m.sh==='y'){o.y++;if(o.m.sh!=='y')o.m=e.m;}
+  list.forEach(function(e){var k=e.m.name;if(!g[k]){g[k]={m:e.m,n:0,by:{},y:0};order.push(k);}var o=g[k];o.n+=(e.m.q||1);if(e.m.sh==='y'){o.y++;if(o.m.sh!=='y')o.m=e.m;}
     if(!o.by[e.a.id])o.by[e.a.id]={a:e.a,n:0};o.by[e.a.id].n++;});
   box.innerHTML='<div class="grid">'+order.map(function(k){var o=g[k];
     return '<button type="button" class="mon '+(o.y?'y':'n')+'" data-who="'+esc(k)+'">'+(o.n>1?'<span class="cnt">×'+o.n+'</span>':'')+img(o.m)+'<div class="nm">'+esc(k)+'</div><div class="dx">#'+('000'+o.m.dex).slice(-3)+'</div><div class="dots">'+
@@ -1379,7 +1380,7 @@ function importData(txt){
 var M={acc:null,mon:null,dex:0,name:'',sp:0,sh:'y',t:'',note:''};
 function openMon(accId,monId){
   var a=acc(accId),m=monId?a.mons.filter(function(x){return x.id===monId;})[0]:null;
-  M={acc:accId,mon:monId,dex:m?m.dex:0,name:m?m.name:'',fk:m?(m.fk||''):'',sp:m?m.sp:0,sh:m?m.sh:'y',t:m?m.t:'',note:m?m.note:'',file:null,rm:false,ph:m?(m.ph||''):''};
+  M={acc:accId,mon:monId,dex:m?m.dex:0,name:m?m.name:'',fk:m?(m.fk||''):'',sp:m?m.sp:0,sh:m?m.sh:'y',t:m?m.t:'',note:m?m.note:'',file:null,rm:false,ph:m?(m.ph||''):'',q:m?(m.q||1):1};
   M.cs=csGet(M.note);M.note=csSet(M.note,'');M.bg=bgGet(M.note);M.note=bgSet(M.note,'');
   drawModal(); $('md').className='modal on';
   setTimeout(function(){var i=$('mName');if(i&&!M.mon)i.focus();},50);
@@ -1392,6 +1393,7 @@ function drawModal(){
    '<label for="mForm">Forma (regional, Mega, Dinamax, Gigamax, Origem, Ataque/Defesa...)</label><select class="in" id="mForm">'+formOpts()+'</select><p class="lg" id="fHint">'+formHint()+'</p>'+
    '<label for="mCos">Fantasia (roupa ou acessório de evento)</label><select class="in" id="mCos">'+cosOpts(M.dex,M.cs)+'</select>'+
    '<label for="mBg">Fundo especial (evento ou local)</label><select class="in" id="mBg">'+bgOpts(M.bg)+'</select>'+
+   '<label for="mQty">Quantidade (quantos você tem deste)</label><input class="in" id="mQty" type="number" inputmode="numeric" min="1" max="9999" step="1" value="'+(M.q||1)+'"><p class="lg">Aparece como um só na Pokédex, com a quantia escrita (ex.: 10X).</p>'+
    '<label for="mSh">Brilhante?</label><select class="in" id="mSh"><option value="y"'+(M.sh==='y'?' selected':'')+'>✨ Sim, brilhante</option><option value="p"'+(M.sh==='p'?' selected':'')+'>❓ Provável (não tenho certeza)</option><option value="n"'+(M.sh==='n'?' selected':'')+'>Normal</option></select>'+
    '<label>Detalhes</label><div class="chips" id="mFlags">'+chips+'</div>'+
    '<label for="mNote">Anotação (item, data, fundo...)</label><input class="in" id="mNote" maxlength="120" value="'+esc(M.note)+'">'+
@@ -1419,18 +1421,18 @@ function saveMon(more){
     if(fv){var fid=formId(M.dex,fv);if(!fid){toast('Esse Pokémon não tem essa forma (as formas ainda estão carregando?)');return;}M.fk=fv;M.name=mkName(M.dex,fv)||base;M.sp=fid;if(fv==='dmax'&&M.t.indexOf('D')<0)M.t+='D';}
     else{M.fk='';M.name=base;M.sp=0;}
   }
-  M.note=csSet($('mNote').value.trim(),M.cs); if(M.cs&&M.t.indexOf('C')<0)M.t+='C';M.note=bgSet(M.note,M.bg);if(M.bg&&M.t.indexOf('B')<0)M.t+='B'; M.sh=$('mSh').value;var mref=null;
+  M.note=csSet($('mNote').value.trim(),M.cs); if(M.cs&&M.t.indexOf('C')<0)M.t+='C';M.note=bgSet(M.note,M.bg);if(M.bg&&M.t.indexOf('B')<0)M.t+='B'; M.sh=$('mSh').value;var mq=Math.max(1,Math.min(9999,Math.floor(+($('mQty')&&$('mQty').value)||1)));var mref=null;
   var a=acc(M.acc);
   if(M.mon){
     var m=a.mons.filter(function(x){return x.id===M.mon;})[0];
-    m.dex=M.dex;m.name=M.name;m.sp=M.sp;m.sh=M.sh;m.t=M.t;m.note=M.note;m.fk=M.fk||'';mref=m;
+    m.dex=M.dex;m.name=M.name;m.sp=M.sp;m.sh=M.sh;m.t=M.t;m.note=M.note;m.fk=M.fk||'';if(mq>1)m.q=mq;else delete m.q;mref=m;
     var to=$('mAcc').value; if(to!==M.acc){a.mons=a.mons.filter(function(x){return x!==m;});acc(to).mons.push(m);}
   }else{
-    var nm0={id:uid(),dex:M.dex,name:M.name,fk:M.fk||'',sp:M.sp,sh:M.sh,t:M.t,note:M.note};a.mons.push(nm0);mref=nm0;
+    var nm0={id:uid(),dex:M.dex,name:M.name,fk:M.fk||'',sp:M.sp,sh:M.sh,t:M.t,note:M.note};if(mq>1)nm0.q=mq;a.mons.push(nm0);mref=nm0;
   }
   save(); toast(M.mon?'Atualizado':'Adicionado');
   if(mref&&(M.file||M.rm)){var f0=M.file;(f0?storePhoto(mref,f0):removePhoto(mref)).then(function(){save();if(V.tab==='acc')drawList();else if(V.tab==='all')drawAll();});}
-  if(more){var keep=M.sh;M={acc:M.acc,mon:null,dex:0,name:'',fk:'',sp:0,sh:keep,t:'',note:'',file:null,rm:false,ph:'',bg:'',cs:''};drawModal();$('mName').focus();drawList();}
+  if(more){var keep=M.sh;M={acc:M.acc,mon:null,dex:0,name:'',fk:'',sp:0,sh:keep,t:'',note:'',file:null,rm:false,ph:'',bg:'',cs:'',q:1};drawModal();$('mName').focus();drawList();}
   else{$('md').className='modal';draw();}
 }
 
