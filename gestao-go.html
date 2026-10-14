@@ -784,7 +784,7 @@ function doRedeem(){
     return b.commit();
   }).then(function(){return loadProfile(uid);}).then(function(){
     setLim();enforce();$('md').className='modal';toast('Key ativada! 🎉');draw();
-  }).catch(function(e){toast(errMsg((e&&(e.code||e.message))||'erro'));}).then(function(){RKLOCK=false;},function(){RKLOCK=false;});
+  }).catch(function(e){var c=(e&&(e.code||e.message))||'erro';if(/permission-denied|insufficient/i.test(c)){toast('O banco recusou. Publique as regras novas do Firestore (arquivo firestore.rules) e tente de novo.');}else toast(errMsg(c));}).then(function(){RKLOCK=false;},function(){RKLOCK=false;});
 }
 function upsellH(why){
   return '<h2>🔑 Limite de '+FREE_ACC+' contas</h2><p style="color:#5D6B82">'+why+'</p><p style="color:#5D6B82">Com uma <b>Key</b> você libera mais contas. Quando a Key terminar, todas as contas ficam bloqueadas e você escolhe '+FREE_ACC+' para continuar usando. Seus dados nunca são apagados.</p>'+redeemBox()+'<div class="row" style="margin-top:10px"><button class="btn y" id="admDm" type="button">💬 Falar com o admin para comprar Key</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
