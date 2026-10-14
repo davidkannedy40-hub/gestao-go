@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Minhas Contas GO</title>
 <link rel="manifest" href="manifest.webmanifest">
+<script>window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.__dp=e;window.dispatchEvent(new Event("pwa-ready"));});</script>
 <meta name="theme-color" content="#16213A">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -255,6 +256,11 @@ nav button[hidden]{display:none}
 .badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:700;background:var(--soft)}
 .badge.a{background:#FFF0BF}.badge.w{background:#FDE2E4;color:var(--red)}
 .btn.s{min-height:34px;padding:6px 10px;font-size:13px}
+#instBar{display:none;align-items:center;gap:8px;width:calc(100% - 32px);max-width:1068px;margin:10px auto 0;padding:10px 12px 10px 14px;background:var(--yel);color:var(--ink);border-radius:var(--r);font-weight:700}
+#instBar span{flex:1;line-height:1.25}
+#instBar button{border:0;border-radius:10px;padding:8px 12px;font-weight:700;min-height:38px}
+#instGo{background:var(--ink);color:#fff}
+#instX{background:transparent;font-size:18px;padding:6px 10px}
 </style>
 </head>
 <body>
@@ -731,7 +737,7 @@ function openAuthModal(){
     $('mdBox').innerHTML='<h2>Login</h2><p style="color:#5D6B82">O login ainda não está ativado neste arquivo. Para ativar, crie um projeto gratuito no Firebase e cole o firebaseConfig no começo do script. O passo a passo está nos comentários no topo do arquivo HTML.</p><div class="row"><button class="btn o" id="mNo" type="button">Fechar</button></div>';
   }else if(logged()){
     var st=SYNC==='busy'?'⏳ sincronizando…':SYNC==='err'?'⚠️ erro ao sincronizar (suas alterações ficam neste aparelho até conseguir)':A.dirty?'⏳ alterações pendentes':'☁️ tudo sincronizado';
-    $('mdBox').innerHTML='<h2>Sua conta</h2><p style="color:#5D6B82">Conectado como <b>'+esc(A.owner)+'</b>'+(isAdm()?' <span class="badge a">Admin</span>':'')+'. Suas contas ficam salvas na nuvem e aparecem em qualquer aparelho em que você entrar.</p><p>'+st+'</p><div class="row"><button class="btn y" id="syncNow" type="button">Sincronizar agora</button><button class="btn o" id="pwChg" type="button">Alterar senha</button><button class="btn r" id="lgOut" type="button">Sair</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
+    $('mdBox').innerHTML='<h2>Sua conta</h2><p style="color:#5D6B82">Conectado como <b>'+esc(A.owner)+'</b>'+(isAdm()?' <span class="badge a">Admin</span>':'')+'. Suas contas ficam salvas na nuvem e aparecem em qualquer aparelho em que você entrar.</p><p>'+st+'</p><div class="row"><button class="btn y" id="syncNow" type="button">Sincronizar agora</button><button class="btn o" id="pwChg" type="button">Alterar senha</button>'+(window.pwaCan&&window.pwaCan()?'<button class="btn y" id="pwaInst" type="button">📲 Instalar app</button>':'')+'<button class="btn r" id="lgOut" type="button">Sair</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
   }else{showGate('in');return;}
   $('md').className='modal on';
 }
@@ -1229,6 +1235,7 @@ document.addEventListener('click',function(e){
   if(b.id==='lgGoRec'){showGate('rec');return;}
   if(b.id==='lgBack'){showGate('in');return;}
   if(b.id==='pwChg'){openPwModal();return;}
+  if(b.id==='pwaInst'){$('md').className='modal';window.pwaInstall();return;}
   if(b.id==='pwGo'){doPw();return;}
   if(b.hasAttribute('data-adm')){admAct(b);return;}
   if(b.id==='syncNow'){$('md').className='modal';toast('Sincronizando…');startSync().then(function(){toast('Sincronizado');});return;}
@@ -1303,6 +1310,37 @@ function boot(){
 boot();
 })();
 </script>
-<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
+<script>
+(function(){
+  var KEY='gestgo.instx';
+  function standalone(){return (window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)||window.navigator.standalone===true;}
+  function ios(){return /iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;}
+  function can(){return !standalone()&&(!!window.__dp||ios());}
+  function dismissed(){try{return sessionStorage.getItem(KEY)==='1';}catch(e){return false;}}
+  var el=document.createElement('div');el.id='instBar';
+  el.innerHTML='<span>📲 Instale o app na tela inicial</span><button id="instGo" type="button">Instalar</button><button id="instX" type="button" aria-label="Fechar">✕</button>';
+  var mn=document.querySelector('main');mn.parentNode.insertBefore(el,mn);
+  function refresh(){
+    var g=document.getElementById('gate'),open=g&&g.className.indexOf('on')>=0;
+    el.style.display=(can()&&!dismissed()&&!open)?'flex':'none';
+  }
+  function install(){
+    if(window.__dp){
+      var d=window.__dp;d.prompt();
+      d.userChoice.then(function(){window.__dp=null;refresh();},function(){});
+    }else if(ios()){
+      alert('No iPhone: toque no botão Compartilhar (quadrado com uma seta) e escolha "Adicionar à Tela de Início".');
+    }
+  }
+  window.pwaCan=can;window.pwaInstall=install;
+  document.getElementById('instGo').addEventListener('click',install);
+  document.getElementById('instX').addEventListener('click',function(){try{sessionStorage.setItem(KEY,'1');}catch(e){}refresh();});
+  window.addEventListener('pwa-ready',refresh);
+  window.addEventListener('appinstalled',function(){window.__dp=null;refresh();});
+  var g=document.getElementById('gate');
+  if(g&&window.MutationObserver)new MutationObserver(refresh).observe(g,{attributes:true,attributeFilter:['class']});
+  refresh();
+})();
+if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
 </body>
 </html>
