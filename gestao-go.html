@@ -44,6 +44,8 @@ service cloud.firestore {
     function notExpired() { return !('expiresAt' in me()) || me().expiresAt > request.time; }
     function profileAfter() { return getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
 
+    function active() { return hasProfile() && notExpired(); }
+
     // Perfil de cada pessoa (usuario + papel). Sem perfil = sem acesso a nada.
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
@@ -136,6 +138,100 @@ service cloud.firestore {
         && request.resource.data.usedBy == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['used','usedBy','usedByName','usedAt']);
       allow delete: if isAdmin();
+    }
+
+    // ===== JANELA DE TROCA =====
+    // Perfil publico de troca (codigo de amizade de 12 numeros)
+    match /tradeProfiles/{u} {
+      allow read: if active();
+      allow create, update: if active() && me().username == u
+        && request.resource.data.keys().hasOnly(['username','friendCode','nick','updatedAt'])
+        && request.resource.data.username == u
+        && request.resource.data.friendCode is string
+        && request.resource.data.friendCode.matches('[0-9]{12}')
+        && request.resource.data.nick is string
+        && request.resource.data.nick.size() <= 30;
+      allow delete: if isAdmin() || (active() && me().username == u);
+    }
+
+    // Pokemon que a pessoa procura (want) ou oferece (offer)
+    match /tradeItems/{id} {
+      allow read: if active();
+      allow create: if active()
+        && request.resource.data.keys().hasOnly(['owner','kind','dex','name','fk','sp','sh','t','note','ph','createdAt'])
+        && request.resource.data.owner == me().username
+        && exists(/databases/$(database)/documents/tradeProfiles/$(me().username))
+        && request.resource.data.kind in ['want','offer']
+        && request.resource.data.sh in ['y','p','n']
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80
+        && request.resource.data.note is string && request.resource.data.note.size() <= 120;
+      allow delete: if isAdmin() || (active() && resource.data.owner == me().username);
+    }
+
+    // Foto de um item (fica separada para a lista de jogadores carregar leve)
+    match /tradePhotos/{id} {
+      allow read: if active();
+      allow create: if active()
+        && request.resource.data.keys().hasOnly(['owner','img'])
+        && request.resource.data.owner == me().username
+        && request.resource.data.img is string && request.resource.data.img.size() < 700000;
+      allow delete: if isAdmin() || (active() && resource.data.owner == me().username);
+    }
+
+    // Chat geral
+    match /chatGlobal/{id} {
+      allow read: if active();
+      allow create: if active()
+        && request.resource.data.keys().hasOnly(['u','text','img','ts'])
+        && request.resource.data.u == me().username
+        && request.resource.data.ts == request.time
+        && request.resource.data.text is string && request.resource.data.text.size() <= 400
+        && (request.resource.data.text.size() > 0 || 'img' in request.resource.data)
+        && (!('img' in request.resource.data) || (request.resource.data.img is string && request.resource.data.img.size() < 250000));
+      allow delete: if isAdmin() || (active() && resource.data.u == me().username);
+    }
+
+    // Conversas privadas (id = dois usuarios em ordem alfabetica separados por __)
+    match /dms/{cid} {
+      allow read: if active() && me().username in resource.data.users;
+      allow create: if active()
+        && request.resource.data.keys().hasOnly(['users','last','lastBy','lastAt'])
+        && request.resource.data.users.size() == 2
+        && request.resource.data.users[0] < request.resource.data.users[1]
+        && cid == request.resource.data.users[0] + '__' + request.resource.data.users[1]
+        && me().username in request.resource.data.users
+        && request.resource.data.lastBy == me().username
+        && request.resource.data.lastAt == request.time
+        && request.resource.data.last.size() <= 60;
+      allow update: if active() && me().username in resource.data.users
+        && request.resource.data.users == resource.data.users
+        && request.resource.data.lastBy == me().username
+        && request.resource.data.lastAt == request.time
+        && request.resource.data.last.size() <= 60;
+      match /msgs/{mid} {
+        allow read: if active() && me().username in get(/databases/$(database)/documents/dms/$(cid)).data.users;
+        allow create: if active()
+          && me().username in getAfter(/databases/$(database)/documents/dms/$(cid)).data.users
+          && request.resource.data.keys().hasOnly(['u','text','img','ts'])
+          && request.resource.data.u == me().username
+          && request.resource.data.ts == request.time
+          && request.resource.data.text is string && request.resource.data.text.size() <= 400
+          && (request.resource.data.text.size() > 0 || 'img' in request.resource.data)
+          && (!('img' in request.resource.data) || (request.resource.data.img is string && request.resource.data.img.size() < 250000));
+        allow delete: if isAdmin() || (active() && resource.data.u == me().username);
+      }
+    }
+
+    // Denuncias (so o admin le e apaga)
+    match /reports/{id} {
+      allow create: if active()
+        && request.resource.data.keys().hasOnly(['by','target','kind','path','text','img','createdAt'])
+        && request.resource.data.by == me().username
+        && request.resource.data.kind in ['gmsg','dm','item']
+        && request.resource.data.path.matches('(chatGlobal/[A-Za-z0-9]+|dms/[a-z0-9._-]+__[a-z0-9._-]+/msgs/[A-Za-z0-9]+|tradeItems/[A-Za-z0-9]+)')
+        && request.resource.data.text.size() <= 200
+        && (!('img' in request.resource.data) || request.resource.data.img.size() < 700000);
+      allow read, delete: if isAdmin();
     }
 
     // Dados do app: cada pessoa so ve os proprios (o documento tem o nome do usuario)
@@ -261,6 +357,39 @@ nav button[hidden]{display:none}
 #instBar button{border:0;border-radius:10px;padding:8px 12px;font-weight:700;min-height:38px}
 #instGo{background:var(--ink);color:#fff}
 #instX{background:transparent;font-size:18px;padding:6px 10px}
+.legend{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:14px 8px;margin:14px 0}
+.tc{position:relative;background:#fff;border:3px solid var(--line);border-radius:var(--r);padding:14px 6px 8px;text-align:center;display:flex;flex-direction:column;align-items:center}
+.tc.want{border-color:var(--red);background:#FFF5F6}
+.tc.offer{border-color:#2F6FE0;background:#F2F7FF}
+.tk{position:absolute;top:-10px;left:8px;color:#fff;font-size:11px;font-weight:800;border-radius:99px;padding:1px 8px}
+.tc.want .tk{background:var(--red)}.tc.offer .tk{background:#2F6FE0}
+.tc>img{width:80px;height:80px;object-fit:contain;image-rendering:pixelated}
+.tc>img.art{image-rendering:auto}
+.tc .nm{font-weight:700;font-size:13px;line-height:1.2}
+.tc .dx{font-size:11px;color:var(--mut)}
+.tc .bd{font-size:15px;min-height:20px}
+.tc .nt{font-size:11px;color:var(--mut);line-height:1.2}
+.pcard{display:flex;gap:10px;align-items:center;width:100%;text-align:left;background:#fff;border:2px solid var(--line);border-radius:var(--r);padding:10px;margin-bottom:8px}
+.av{width:44px;height:44px;border-radius:50%;background:var(--yel);display:grid;place-items:center;font:800 20px 'Bricolage Grotesque',sans-serif;flex:none}
+.minis{display:flex;flex-wrap:wrap;gap:3px;margin-top:6px}
+.mi{display:inline-flex;border:2px solid;border-radius:8px;background:#fff}
+.mi.want{border-color:var(--red)}.mi.offer{border-color:#2F6FE0}
+.mi img{width:34px;height:34px;image-rendering:pixelated;object-fit:contain}
+.mi img.art{image-rendering:auto}
+.chat{display:flex;flex-direction:column;gap:6px;max-height:55vh;min-height:180px;overflow:auto;padding:8px;background:#fff;border:2px solid var(--line);border-radius:var(--r)}
+.msg{max-width:88%;align-self:flex-start;background:var(--soft);border-radius:12px;padding:6px 10px}
+.msg.me{align-self:flex-end;background:#FFF0BF}
+.msg .au{font-size:12px;font-weight:700;color:var(--mut)}
+.msg .tx{white-space:pre-wrap;word-break:break-word}
+.msg img.ci{max-width:100%;max-height:220px;border-radius:8px;display:block;margin-top:4px;cursor:zoom-in}
+.msg .ma{display:flex;gap:4px;justify-content:flex-end}
+.msg .ma button{border:0;background:transparent;font-size:14px;padding:2px 6px;opacity:.7}
+.lnk{border:0;background:none;padding:0;font-weight:700;color:inherit;text-decoration:underline}
+.comp{display:flex;gap:6px;align-items:flex-end;margin-top:8px}
+.comp textarea{flex:1;min-height:44px;max-height:100px;resize:none}
+.pend{display:flex;align-items:center;gap:8px;margin-top:8px}
+.pend img{max-height:70px;border-radius:8px}
 </style>
 </head>
 <body>
@@ -272,12 +401,14 @@ nav button[hidden]{display:none}
   <section class="view" id="v-who"></section>
   <section class="view" id="v-bkp"></section>
   <section class="view" id="v-adm"></section>
+  <section class="view" id="v-trade"></section>
 </main>
 <button class="fab" id="fab" type="button" aria-label="Adicionar Pokémon">+</button>
 <nav role="tablist">
   <button type="button" role="tab" data-tab="home" aria-selected="true"><span class="ic">👥</span>Contas</button>
   <button type="button" role="tab" data-tab="all" aria-selected="false"><span class="ic">🌐</span>Geral</button>
   <button type="button" role="tab" data-tab="who" aria-selected="false"><span class="ic">🔎</span>Quem tem?</button>
+  <button type="button" role="tab" data-tab="trade" aria-selected="false"><span class="ic">🔄</span>Troca</button>
   <button type="button" role="tab" data-tab="bkp" aria-selected="false"><span class="ic">💾</span>Backup</button>
   <button type="button" role="tab" data-tab="adm" id="navAdm" aria-selected="false" hidden><span class="ic">🛡️</span>Admin</button>
 </nav>
@@ -386,7 +517,7 @@ function count(a,fn){return a.mons.filter(fn).length;}
 
 /* ---------- Login, nuvem e fotos ---------- */
 var CLOUD=!!(FB_CONFIG.apiKey&&FB_CONFIG.projectId&&window.firebase);
-var A=loadAuth(),SYNC='',pushT=null,SYNCING=false,PHC={};
+var A=loadAuth(),SYNCERR='',SYNC='',pushT=null,SYNCING=false,PHC={};
 var fbAuth=null,fbDb=null,authReady=Promise.resolve(),unsub=null;
 if(CLOUD){
   try{
@@ -448,13 +579,13 @@ function pullCloud(){
 }
 function pushCloud(){
   if(!logged())return Promise.resolve(false);
-  if(!navigator.onLine){setSync('err');return Promise.resolve(false);}
+  if(!navigator.onLine){SYNCERR='sem conexão com a internet';setSync('err');return Promise.resolve(false);}
   var ts=new Date().toISOString();
   return ensure().then(function(){
     if(!logged())return false;
-    return cloudRef().set({json:JSON.stringify(D),updated_at:ts})
-    .then(function(){A.cloudTs=ts;A.dirty=false;saveAuth();setSync('ok');return true;});
-  }).catch(function(e){if(e&&e.code==='permission-denied'){forceOut('Seu acesso foi encerrado. Fale com o administrador.');return false;}setSync('err');return false;});
+    var js=JSON.stringify(D);if(js.length>950000){SYNCERR='dados grandes demais ('+Math.round(js.length/1024)+' KB; o limite é ~1000 KB)';setSync('err');return false;}return cloudRef().set({json:js,updated_at:ts})
+    .then(function(){A.cloudTs=ts;A.dirty=false;SYNCERR='';saveAuth();setSync('ok');return true;});
+  }).catch(function(e){if(e&&e.code==='permission-denied'){forceOut('Seu acesso foi encerrado. Fale com o administrador.');return false;}SYNCERR=String((e&&(e.code||e.message))||'erro desconhecido').slice(0,160);setSync('err');return false;});
 }
 function watch(){
   if(!logged()||unsub)return;
@@ -482,7 +613,7 @@ function startSync(){
     if(same){if(A.dirty)return pushCloud();setSync('ok');return null;}
     if(A.dirty&&!confirm('Este aparelho e a nuvem têm alterações diferentes.\n\nOK = usar os dados da nuvem (descarta as alterações deste aparelho)\nCancelar = enviar os deste aparelho para a nuvem'))return pushCloud();
     applyCloud(row);setSync('ok');draw();return row.legacy?pushCloud():null;
-  }).then(function(){watch();}).catch(function(){setSync('err');});
+  }).then(function(){watch();}).catch(function(e){SYNCERR=String((e&&(e.code||e.message))||'erro desconhecido').slice(0,160);setSync('err');});
 }
 function doLogin(){
   var u=cleanU($('lgU').value),pw=$('lgP').value||'';
@@ -531,7 +662,7 @@ function afterLogin(u){
   });
 }
 function doLogout(){
-  var go=function(){
+  var go=function(){tStop();T.me=null;T.players=null;
     unwatch();if(CLOUD)fbAuth.signOut().catch(function(){});
     A.session=null;A.owner='';A.cloudTs='';A.dirty=false;A.skip=false;saveAuth();UN='';PROFILE=null;ADM.loaded=false;navRole();
     Object.keys(PHC).forEach(dropCache);
@@ -562,7 +693,7 @@ function claimAdmin(user,u){
   b.set(fbDb.collection('usernames').doc(u),{uid:user.uid,ver:0,deleted:false});
   return b.commit().then(function(){PROFILE=p;navRole();return p;});
 }
-function forceOut(msg){
+function forceOut(msg){tStop();
   unwatch();if(CLOUD)fbAuth.signOut().catch(function(){});
   A.session=null;A.owner='';A.cloudTs='';A.dirty=false;saveAuth();UN='';PROFILE=null;ADM.loaded=false;
   Object.keys(PHC).forEach(dropCache);
@@ -654,7 +785,7 @@ function admFail(e){toast(errMsg(e&&(e.code||e.message)));}
 function fmtD(s){try{return new Date(s).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
 function admLoad(){
   ADM.busy=true;ADM.err='';renderAdm();
-  Promise.all([fbDb.collection('keys').get(),fbDb.collection('usernames').get(),fbDb.collection('users').get()]).then(function(r){
+  Promise.all([fbDb.collection('keys').get(),fbDb.collection('usernames').get(),fbDb.collection('users').get(),fbDb.collection('reports').get().catch(function(){return null;})]).then(function(r){ADM.reports=r[3]?r[3].docs.map(function(x){var y=x.data();y.id=x.id;return y;}).sort(function(a,b){return String(b.createdAt).localeCompare(String(a.createdAt));}):[];
     ADM.keys=r[0].docs.map(function(d){var x=d.data();x.id=d.id;return x;}).sort(function(a,b){return String(b.createdAt).localeCompare(String(a.createdAt));});
     var prof={};r[2].docs.forEach(function(d){prof[d.id]=d.data();});
     ADM.users=r[1].docs.map(function(d){var x=d.data();x.name=d.id;x.p=prof[x.uid]||null;return x;}).filter(function(x){return !x.deleted;}).sort(function(a,b){return a.name<b.name?-1:1;});
@@ -684,6 +815,7 @@ function renderAdm(){
     h+='</div>';});
   if(ADM.loaded&&!ADM.users.length)h+='<p class="lg">Nenhum usuário ainda.</p>';
   h+='</div>';
+  if(ADM.loaded)h+=admRepHtml();
   el.innerHTML=h;
 }
 function showKey(k,type,u,days){
@@ -694,6 +826,8 @@ function keyDoc(type,u,days,exp){var d={type:type,used:false,usedBy:null,usedByN
 function admAct(b){
   var a=b.getAttribute('data-adm'),k=b.getAttribute('data-k'),u=b.getAttribute('data-u'),uid=b.getAttribute('data-uid');
   if(a==='refresh'){ADM.loaded=false;ADM.err='';admLoad();return;}
+  if(a==='repok'){fbDb.collection('reports').doc(b.getAttribute('data-id')).delete().then(function(){ADM.loaded=false;admLoad();}).catch(admFail);return;}
+  if(a==='repdel'){var rp=b.getAttribute('data-p'),rid=b.getAttribute('data-id');if(!/^(chatGlobal\/[A-Za-z0-9]+|dms\/[a-z0-9._-]+__[a-z0-9._-]+\/msgs\/[A-Za-z0-9]+|tradeItems\/[A-Za-z0-9]+)$/.test(rp)){toast('Caminho inválido');return;}if(!confirm('Excluir este conteúdo?'))return;var rb=fbDb.batch(),pm=rp.match(/^tradeItems\/(.+)$/);rb.delete(fbDb.doc(rp));if(pm)rb.delete(fbDb.collection('tradePhotos').doc(pm[1]));rb.delete(fbDb.collection('reports').doc(rid));rb.commit().then(function(){toast('Conteúdo excluído');ADM.loaded=false;admLoad();}).catch(admFail);return;}
   if(a==='copy'){copyTxt(k);return;}
   if(a==='genkey'){var nk=newKey(),gd=+b.getAttribute('data-days')||0;fbDb.collection('keys').doc(nk).set(keyDoc('register','',gd)).then(function(){showKey(nk,'register','',gd);ADM.loaded=false;admLoad();}).catch(admFail);return;}
   if(a==='delkey'){if(!confirm('Revogar esta chave? Ela deixa de funcionar.'))return;fbDb.collection('keys').doc(k).delete().then(function(){toast('Chave revogada');ADM.loaded=false;admLoad();}).catch(admFail);return;}
@@ -712,7 +846,7 @@ function admAct(b){
     if(uid)db.delete(fbDb.collection('users').doc(uid));
     db.update(fbDb.collection('usernames').doc(u),{uid:null,ver:ver+1,deleted:true});
     db.delete(fbDb.collection('gestao').doc(u));
-    db.commit().then(function(){toast('Usuário excluído');ADM.loaded=false;admLoad();}).catch(admFail);return;
+    db.commit().then(function(){return admPurge(u);}).then(function(){toast('Usuário excluído');ADM.loaded=false;admLoad();}).catch(admFail);return;
   }
 }
 function showGate(mode){
@@ -736,7 +870,7 @@ function openAuthModal(){
   if(!CLOUD){
     $('mdBox').innerHTML='<h2>Login</h2><p style="color:#5D6B82">O login ainda não está ativado neste arquivo. Para ativar, crie um projeto gratuito no Firebase e cole o firebaseConfig no começo do script. O passo a passo está nos comentários no topo do arquivo HTML.</p><div class="row"><button class="btn o" id="mNo" type="button">Fechar</button></div>';
   }else if(logged()){
-    var st=SYNC==='busy'?'⏳ sincronizando…':SYNC==='err'?'⚠️ erro ao sincronizar (suas alterações ficam neste aparelho até conseguir)':A.dirty?'⏳ alterações pendentes':'☁️ tudo sincronizado';
+    var st=SYNC==='busy'?'⏳ sincronizando…':SYNC==='err'?'⚠️ erro ao sincronizar (suas alterações ficam neste aparelho até conseguir)'+(SYNCERR?'<br><small style="color:#D7263D">Detalhe: '+esc(SYNCERR)+'</small>':''):A.dirty?'⏳ alterações pendentes':'☁️ tudo sincronizado';
     $('mdBox').innerHTML='<h2>Sua conta</h2><p style="color:#5D6B82">Conectado como <b>'+esc(A.owner)+'</b>'+(isAdm()?' <span class="badge a">Admin</span>':'')+'. Suas contas ficam salvas na nuvem e aparecem em qualquer aparelho em que você entrar.</p><p>'+st+'</p><div class="row"><button class="btn y" id="syncNow" type="button">Sincronizar agora</button><button class="btn o" id="pwChg" type="button">Alterar senha</button>'+(window.pwaCan&&window.pwaCan()?'<button class="btn y" id="pwaInst" type="button">📲 Instalar app</button>':'')+'<button class="btn r" id="lgOut" type="button">Sair</button><button class="btn o" id="mNo" type="button">Fechar</button></div>';
   }else{showGate('in');return;}
   $('md').className='modal on';
@@ -1184,11 +1318,424 @@ function openAcc(){
   $('md').className='modal on';
 }
 
+/* ---------- Janela de Troca ---------- */
+var T={s:'players',user:'',players:null,items:null,me:null,pp:null,pi:[],cid:'',peer:'',un:[],dmu:null,pend:'',q:'',last:0,cache:{}};
+var TI=null,BADSET={};
+var BADW=['porra','caralho','caralha','caralhos','puta','putas','puto','putaria','putinha','merda','bosta','buceta','bucetas','xoxota','xereca','piroca','foda','fodase','foder','fode','fodeu','fodendo','fodido','fodida','viado','viadinho','arrombado','arrombada','cuzao','cu','corno','cacete','otario','babaca','pqp','tnc','vtnc','krl','fdp','vsf','fuck','fucking','shit','bitch','asshole','dick','pussy','cunt','nigger','nigga','bastard'];
+function cz(s){return s.replace(/(.)\1+/g,'$1');}
+BADW.forEach(function(w){BADSET[cz(w)]=1;});
+function pf(t){
+  var LM={'0':'o','1':'i','3':'e','4':'a','5':'s','7':'t','8':'b','@':'a','$':'s'};
+  var s=norm(t).replace(/[0134578@$]/g,function(c){return LM[c];});
+  var raw=s.split(/[^a-z]+/).filter(Boolean),toks=[],run='';
+  raw.forEach(function(w){if(w.length===1){run+=w;}else{if(run.length>1)toks.push(run);run='';toks.push(w);}});
+  if(run.length>1)toks.push(run);
+  return toks.some(function(w){var c=cz(w);return !!(BADSET[c]||BADSET[c.replace(/s$/,'')]);});
+}
+function tOk(){return CLOUD&&logged()&&!!PROFILE;}
+function tStop(){
+  (T.un||[]).forEach(function(f){try{f();}catch(e){}});T.un=[];
+  if(T.dmu){try{T.dmu();}catch(e){}T.dmu=null;}
+}
+function tms(ts){if(!ts)return 0;var d=ts.toDate?ts.toDate():new Date(ts);return d.getTime()||0;}
+function tT(ts){
+  if(!ts)return '';var d=ts.toDate?ts.toDate():new Date(ts),n=new Date(),hm=d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  return d.toDateString()===n.toDateString()?hm:d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' '+hm;
+}
+function tCode(c){return String(c||'').replace(/(\d{4})(?=\d)/g,'$1 ');}
+function cleanCode(s){return String(s||'').replace(/\D/g,'').slice(0,12);}
+function tErr(e){toast(errMsg((e&&(e.code||e.message))||''));}
+function safeImg(s){return typeof s==='string'&&s.indexOf('data:image/')===0;}
+function tImgOk(){
+  var ok=false;try{ok=localStorage.getItem('gestgo.imgok')==='1';}catch(e){}
+  if(ok)return true;
+  if(confirm('ATENÇÃO: é proibido enviar nudez ou qualquer imagem imprópria. Quem fizer isso será BANIDO para sempre.\n\nEnvie só fotos de Pokémon e prints do jogo. Você concorda?')){try{localStorage.setItem('gestgo.imgok','1');}catch(e){}return true;}
+  return false;
+}
+function tCompress(file,maxDim,maxLen){
+  return new Promise(function(res,rej){
+    var u=URL.createObjectURL(file),im=new Image();
+    im.onload=function(){
+      URL.revokeObjectURL(u);
+      var s=Math.min(1,maxDim/Math.max(im.width,im.height)),q=0.85,out='';
+      for(var n=0;n<14;n++){
+        var w=Math.max(1,Math.round(im.width*s)),h=Math.max(1,Math.round(im.height*s)),c=document.createElement('canvas');
+        c.width=w;c.height=h;var x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);
+        out=c.toDataURL('image/jpeg',q);
+        if(out.length<=maxLen){res(out);return;}
+        if(q>0.5)q-=0.1;else s*=0.8;
+      }
+      rej(new Error('big'));
+    };
+    im.onerror=function(){URL.revokeObjectURL(u);rej(new Error('img'));};
+    im.src=u;
+  });
+}
+function renderTrade(){
+  var el=$('v-trade');if(!el)return;
+  if(!tOk()){
+    tStop();
+    el.innerHTML='<div class="panel"><h3>🔄 Janela de Troca</h3><p>Entre na sua conta para ver os jogadores, combinar trocas e conversar.</p><button class="btn y" type="button" data-t="login">'+(CLOUD?'Entrar':'Como ativar o login')+'</button></div>';
+    return;
+  }
+  var on=T.s==='profile'?'players':T.s==='dm'?'inbox':T.s;
+  el.innerHTML='<div class="bar"><h2>🔄 Janela de Troca</h2></div><div class="chips" role="group" aria-label="Seção">'+
+    [['players','👥 Jogadores'],['chat','💬 Chat geral'],['inbox','✉️ Mensagens']].map(function(c){return '<button type="button" class="chip" data-t="go" data-ts="'+c[0]+'" aria-pressed="'+(on===c[0])+'">'+c[1]+'</button>';}).join('')+
+    '</div><div id="tBody" style="margin-top:12px"></div>';
+  tDraw();
+}
+function tDraw(){
+  tStop();
+  if(!$('tBody'))return;
+  if(T.s==='players')tPlayers();
+  else if(T.s==='profile')tProfile();
+  else if(T.s==='chat')tChat();
+  else if(T.s==='inbox')tInbox();
+  else if(T.s==='dm')tDm();
+}
+function tFail(e){
+  var b=$('tBody');if(!b)return;
+  b.innerHTML='<div class="panel"><p style="color:#D7263D">'+esc(errMsg((e&&(e.code||e.message))||''))+'</p><button class="btn o" type="button" data-t="retry">Tentar de novo</button></div>';
+}
+/* ---- Jogadores ---- */
+function tPlayers(){
+  $('tBody').innerHTML='<div class="empty">Carregando…</div>';
+  Promise.all([fbDb.collection('tradeProfiles').get(),fbDb.collection('tradeItems').get()]).then(function(r){
+    T.players=r[0].docs.map(function(d){return d.data();});
+    var g={};r[1].docs.forEach(function(d){var x=d.data();x.id=d.id;(g[x.owner]=g[x.owner]||[]).push(x);});
+    T.items=g;
+    T.me=T.players.filter(function(p){return p.username===UN;})[0]||null;
+    tPlayersDraw();
+  }).catch(tFail);
+}
+function tLegend(){return '<div class="legend"><span class="badge w">🔴 Borda vermelha = procura</span><span class="badge" style="background:#DCE8FF">🔵 Borda azul = oferece</span></div>';}
+function tPlayersDraw(){
+  var b=$('tBody');if(!b||T.s!=='players')return;
+  var h='';
+  if(!T.me)h+='<div class="panel"><h3>Entre na Janela de Troca</h3><p>Cadastre seu código de amizade do Pokémon GO. Sem ele você não aparece aqui e não pode colocar Pokémon para trocar.</p><button class="btn y" type="button" data-t="code">Cadastrar código de amizade</button></div>';
+  else h+='<div class="row" style="margin-bottom:10px"><button class="btn y" type="button" data-t="prof" data-tu="'+esc(UN)+'">Meu perfil de troca</button></div>';
+  h+=tLegend()+'<input class="in" id="tq" type="search" placeholder="Buscar jogador ou Pokémon" value="'+esc(T.q)+'" style="margin:10px 0"><div id="tPl"></div>';
+  b.innerHTML=h;tPlList();
+}
+function tPlList(){
+  var box=$('tPl');if(!box)return;
+  var q=norm(T.q).trim();
+  function hit(i){return q&&norm(i.name).indexOf(q)>=0;}
+  var list=(T.players||[]).filter(function(p){
+    if(!q)return true;
+    if(norm(p.username).indexOf(q)>=0||norm(p.nick||'').indexOf(q)>=0)return true;
+    return (T.items[p.username]||[]).some(hit);
+  }).sort(function(a,b){if(a.username===UN)return -1;if(b.username===UN)return 1;return a.username<b.username?-1:1;});
+  if(!list.length){box.innerHTML='<div class="empty">'+((T.players||[]).length?'Ninguém encontrado.':'Ainda não há jogadores. Seja o primeiro a cadastrar o código!')+'</div>';return;}
+  box.innerHTML=list.map(function(p){
+    var its=(T.items[p.username]||[]).slice().sort(function(a,b){return (hit(b)?1:0)-(hit(a)?1:0)||(a.kind==='want'?-1:1);});
+    var w=its.filter(function(i){return i.kind==='want';}).length,o=its.length-w;
+    return '<button type="button" class="pcard" data-t="prof" data-tu="'+esc(p.username)+'"><div class="av">'+esc(p.username.charAt(0).toUpperCase())+'</div><div style="flex:1;min-width:0"><b>'+esc(p.username)+'</b>'+(p.username===UN?' <span class="badge a">você</span>':'')+(p.nick?' <span class="lg">'+esc(p.nick)+'</span>':'')+
+      '<div class="nums" style="margin:4px 0 0"><span class="pill" style="background:#FDE2E4">🔴 '+w+' procura</span> <span class="pill" style="background:#DCE8FF">🔵 '+o+' oferece</span></div>'+
+      '<div class="minis">'+its.slice(0,8).map(function(i){return '<span class="mi '+(i.kind==='want'?'want':'offer')+'">'+img(i)+'</span>';}).join('')+'</div></div></button>';
+  }).join('');
+}
+/* ---- Perfil ---- */
+function tProfile(){
+  var u=T.user;
+  $('tBody').innerHTML='<div class="empty">Carregando…</div>';
+  Promise.all([fbDb.collection('tradeProfiles').doc(u).get(),fbDb.collection('tradeItems').where('owner','==',u).get()]).then(function(r){
+    if(T.s!=='profile'||T.user!==u)return;
+    T.pp=r[0].exists?r[0].data():null;
+    if(u===UN)T.me=T.pp;
+    T.pi=r[1].docs.map(function(d){var x=d.data();x.id=d.id;return x;}).sort(function(a,b){return String(a.createdAt)<String(b.createdAt)?1:-1;});
+    tProfileDraw();
+  }).catch(tFail);
+}
+function tCard(it,mine){
+  var k=it.kind==='want'?'want':'offer';
+  return '<div class="tc '+k+'"><span class="tk">'+(k==='want'?'🔴 Procura':'🔵 Oferece')+'</span>'+img(it)+'<div class="nm">'+esc(it.name)+'</div><div class="dx">#'+('000'+it.dex).slice(-3)+'</div><div class="bd">'+badges({sh:it.sh,t:it.t||'',fk:it.fk||''})+'</div>'+(it.note?'<div class="nt">'+esc(it.note)+'</div>':'')+
+    '<div class="row" style="justify-content:center;margin-top:6px;gap:4px">'+(it.ph?'<button type="button" class="btn o s" data-t="photo" data-tid="'+it.id+'">📷 Foto</button>':'')+
+    (mine?'<button type="button" class="btn r s" data-t="delitem" data-tid="'+it.id+'" aria-label="Remover">🗑</button>':'<button type="button" class="btn o s" data-t="repitem" data-tid="'+it.id+'" aria-label="Denunciar">🚩</button>')+'</div></div>';
+}
+function tProfileDraw(){
+  var b=$('tBody');if(!b||T.s!=='profile')return;
+  var u=T.user,mine=u===UN,p=T.pp,h='';
+  h+='<div class="bar"><button type="button" class="btn o" data-t="go" data-ts="players">← Jogadores</button></div>';
+  h+='<div class="panel"><div style="display:flex;gap:12px;align-items:center"><div class="av">'+esc(u.charAt(0).toUpperCase())+'</div><div style="flex:1;min-width:0"><h3 style="margin:0">'+esc(u)+(mine?' <span class="badge a">você</span>':'')+'</h3>'+
+    (p?'<div style="font-weight:700">Código: '+tCode(p.friendCode)+'</div>'+(p.nick?'<div class="lg" style="margin:0">Nick: '+esc(p.nick)+'</div>':''):'<div class="lg" style="margin:0">Ainda não cadastrou o código de amizade.</div>')+'</div></div><div class="row" style="margin-top:10px">';
+  if(p)h+='<button class="btn o" type="button" data-t="copy" data-tp="'+esc(p.friendCode)+'">Copiar código</button>';
+  if(mine)h+='<button class="btn o" type="button" data-t="code">'+(p?'Alterar código':'Cadastrar código')+'</button>';
+  else h+='<button class="btn y" type="button" data-t="dm" data-tu="'+esc(u)+'">💬 Mandar mensagem</button>';
+  h+='</div></div>'+tLegend();
+  [['want','🔴 Procurando'],['offer','🔵 Oferecendo']].forEach(function(s){
+    var l=T.pi.filter(function(i){return i.kind===s[0];});
+    h+='<div class="bar" style="margin-top:14px"><h2 style="font-size:18px">'+s[1]+' ('+l.length+')</h2>'+(mine?'<button class="btn y s" type="button" data-t="add" data-tk="'+s[0]+'">＋ Adicionar</button>':'')+'</div>'+
+      (l.length?'<div class="tgrid">'+l.map(function(i){return tCard(i,mine);}).join('')+'</div>':'<div class="empty">Nada por aqui.</div>');
+  });
+  b.innerHTML=h;
+}
+/* ---- Código de amizade ---- */
+function tCodeModal(){
+  var m=T.me||{};
+  $('mdBox').innerHTML='<h2>Código de amizade</h2><p style="color:#5D6B82;margin:0 0 8px">É o código de 12 números do Pokémon GO. Outros jogadores usam para te adicionar e trocar.</p><label for="tfc">Código (12 números)</label><input class="in" id="tfc" inputmode="numeric" maxlength="16" placeholder="0000 0000 0000" value="'+esc(tCode(m.friendCode||''))+'"><label for="tfn">Nick no jogo (opcional)</label><input class="in" id="tfn" maxlength="30" value="'+esc(m.nick||'')+'"><div class="row" style="margin-top:14px"><button class="btn y" type="button" data-t="codesave">Salvar</button><button class="btn o" id="mNo" type="button">Cancelar</button></div>';
+  $('md').className='modal on';
+}
+function tCodeSave(){
+  var c=cleanCode($('tfc').value),n=$('tfn').value.trim().slice(0,30);
+  if(c.length!==12){toast('O código de amizade tem 12 números');return;}
+  var d={username:UN,friendCode:c,nick:n,updatedAt:new Date().toISOString()};
+  fbDb.collection('tradeProfiles').doc(UN).set(d).then(function(){
+    T.me=d;$('md').className='modal';toast('Código salvo');
+    if(T.s==='players')tPlayers();else if(T.s==='profile')tProfile();
+  }).catch(tErr);
+}
+/* ---- Adicionar Pokémon (procuro / ofereço) ---- */
+function tAdd(kind){
+  if(!T.me){tCodeModal();toast('Cadastre seu código de amizade primeiro');return;}
+  TI={kind:kind,dex:0,name:'',fk:'',sp:0,sh:'y',t:'',note:'',img:''};
+  tiDraw();$('md').className='modal on';
+}
+function tiForms(){
+  var fs=TI.dex?formsFor(TI.dex):[],cur=TI.fk||'',h='<option value="">Normal</option>';
+  [['reg','Regionais'],['mega','Mega Evolução / Primal'],['gmax','Gigamax'],['alt','Outras formas']].forEach(function(g){
+    var l=fs.filter(function(f){return kindOf(f.k)===g[0];}).sort(function(a,b){return a.k<b.k?-1:1;});if(!l.length)return;
+    h+='<optgroup label="'+g[1]+'">'+l.map(function(f){return '<option value="'+esc(f.k)+'"'+(f.k===cur?' selected':'')+'>'+esc(lbl(f.k))+'</option>';}).join('')+'</optgroup>';
+  });
+  if(cur&&!fs.some(function(f){return f.k===cur;}))h+='<option value="'+esc(cur)+'" selected>'+esc(lbl(cur))+'</option>';
+  return h;
+}
+function tiDraw(){
+  var h='<h2>'+(TI.kind==='want'?'🔴 Pokémon que eu procuro':'🔵 Pokémon que eu ofereço')+'</h2>';
+  if(TI.kind==='offer')h+='<button type="button" class="btn o" data-t="mine" style="width:100%">📦 Escolher da minha coleção</button>';
+  h+='<label for="tiName">Pokémon (nome ou número)</label><input class="in" id="tiName" autocomplete="off" placeholder="Ex.: Pikachu" value="'+esc(TI.dex&&SPN[TI.dex]?SPN[TI.dex]:TI.name)+'"><div class="sug" id="tiSug"></div><div class="pick" id="tiPick">'+(TI.dex?'✓ '+esc(SPN[TI.dex]||TI.name)+' #'+TI.dex:'')+'</div>'+
+   '<label for="tiForm">Forma (regional, Mega, Armadura...)</label><select class="in" id="tiForm">'+tiForms()+'</select>'+
+   '<label for="tiSh">Brilhante?</label><select class="in" id="tiSh"><option value="y"'+(TI.sh==='y'?' selected':'')+'>✨ Shine</option><option value="p"'+(TI.sh==='p'?' selected':'')+'>❓ Provável</option><option value="n"'+(TI.sh==='n'?' selected':'')+'>Normal</option></select>'+
+   '<label>Detalhes</label><div class="chips">'+FORDER.split('').map(function(k){return '<button type="button" class="chip" data-t="tiflag" data-tp="'+k+'" aria-pressed="'+(TI.t.indexOf(k)>=0)+'">'+FLAGS[k][0]+' '+FLAGS[k][1]+'</button>';}).join('')+'</div>'+
+   '<label for="tiNote">Anotação (balão, corredor, fundo...)</label><input class="in" id="tiNote" maxlength="120" value="'+esc(TI.note)+'">'+
+   '<label>Foto original (opcional)</label><div id="tiPh"></div><input type="file" id="tiFile" accept="image/*" hidden>'+
+   '<div class="row" style="margin-top:14px"><button class="btn y" type="button" data-t="tisave">Salvar</button><button class="btn o" id="mNo" type="button">Cancelar</button></div>';
+  $('mdBox').innerHTML=h;tiPh();
+}
+function tiPh(){
+  var b=$('tiPh');if(!b)return;
+  b.innerHTML=(TI.img?'<img src="'+esc(TI.img)+'" alt="Foto" data-t="zoom" style="max-width:100%;max-height:180px;border-radius:10px;display:block;margin-bottom:8px;cursor:zoom-in">':'')+
+    '<div class="row"><button type="button" class="btn o" data-t="tiph">📷 '+(TI.img?'Trocar foto':'Enviar foto')+'</button>'+(TI.img?'<button type="button" class="btn r" data-t="tiphrm">Remover</button>':'')+'</div><p class="lg">Fotos enviadas são reduzidas (máx. ~600 KB) para caber na nuvem gratuita.</p>';
+}
+function tiSuggest(q){
+  var n=norm(q).trim(),box=$('tiSug');if(!box)return;
+  if(!n){box.innerHTML='';return;}
+  var out=[],i,s;
+  for(i=0;i<SP.length&&out.length<6;i++){s=SP[i];if(norm(s.name).indexOf(n)===0||String(s.id)===n.replace('#',''))out.push(s);}
+  for(i=0;i<SP.length&&out.length<6;i++){s=SP[i];if(out.indexOf(s)<0&&norm(s.name).indexOf(n)>0)out.push(s);}
+  box.innerHTML=out.map(function(s){return '<button type="button" data-t="tisp" data-tp="'+s.id+'"><img alt="" src="'+SPR+s.id+'.png">'+esc(s.name)+' <span style="color:#5D6B82;font-size:12px">#'+s.id+'</span></button>';}).join('');
+}
+function tiSave(){
+  var name=($('tiName').value||'').trim();
+  if(!TI.dex){var f=SP.filter(function(s){return norm(s.name)===norm(name);})[0];if(f){TI.dex=f.id;TI.name=f.name;}}
+  if(!TI.dex){toast('Escolha o Pokémon na lista');return;}
+  var fv=$('tiForm').value,base=SPN[TI.dex]||TI.name;
+  if(fv){var fid=formId(TI.dex,fv);if(!fid){toast('Forma indisponível (ainda carregando?)');return;}TI.fk=fv;TI.name=mkName(TI.dex,fv)||base;TI.sp=fid;}
+  else{TI.fk='';TI.name=base;TI.sp=0;}
+  TI.sh=$('tiSh').value;TI.note=$('tiNote').value.trim();
+  var id=fbDb.collection('tradeItems').doc().id,bt=fbDb.batch();
+  bt.set(fbDb.collection('tradeItems').doc(id),{owner:UN,kind:TI.kind,dex:TI.dex,name:TI.name,fk:TI.fk,sp:TI.sp,sh:TI.sh,t:TI.t,note:TI.note,ph:!!TI.img,createdAt:new Date().toISOString()});
+  if(TI.img)bt.set(fbDb.collection('tradePhotos').doc(id),{owner:UN,img:TI.img});
+  bt.commit().then(function(){$('md').className='modal';toast('Adicionado na Janela de Troca');if(T.s==='profile'&&T.user===UN)tProfile();}).catch(tErr);
+}
+function tMine(){
+  $('mdBox').innerHTML='<h2>Minha coleção</h2><input class="in" id="tmq" type="search" placeholder="Buscar nome ou número"><div class="sug" id="tml" style="max-height:50vh;overflow:auto"></div><div class="row" style="margin-top:12px"><button class="btn o" type="button" data-t="tiback">← Voltar</button></div>';
+  tMineList();
+}
+function tMineList(){
+  var q=norm(($('tmq')||{}).value||'').trim(),out=[];
+  D.accounts.forEach(function(a){a.mons.forEach(function(m){if(out.length<80&&(!q||norm(m.name).indexOf(q)>=0||String(m.dex)===q))out.push([a,m]);});});
+  $('tml').innerHTML=out.length?out.map(function(e){var m=e[1];return '<button type="button" data-t="mpick" data-tp="'+e[0].id+'|'+m.id+'">'+img(m)+'<span>'+esc(m.name)+' '+badges(m)+' <span style="color:#5D6B82;font-size:12px">'+esc(e[0].name)+(m.note?' · '+esc(m.note):'')+'</span></span></button>';}).join(''):'<div class="empty">Nada encontrado.</div>';
+}
+function tMinePick(p){
+  var x=p.split('|'),a=acc(x[0]),m=a&&a.mons.filter(function(z){return z.id===x[1];})[0];if(!m)return;
+  TI.dex=m.dex;TI.name=m.name;TI.fk=m.fk||'';TI.sp=m.sp||0;TI.sh=m.sh;TI.t=m.t||'';TI.note=m.note||'';TI.img='';
+  tiDraw();
+  if(m.ph)photoUrl(m).then(function(u){return u?fetch(u):null;}).then(function(r){return r?r.blob():null;}).then(function(bl){return bl?tCompress(bl,1600,600000):null;}).then(function(d){if(d&&TI){TI.img=d;tiPh();}}).catch(function(){});
+}
+/* ---- Chat (geral e privado) ---- */
+function tComposer(ph){
+  return '<div id="tPend"></div><div class="comp"><button type="button" class="btn o" data-t="pickimg" aria-label="Enviar foto">📷</button><textarea class="in" id="tcm" maxlength="400" rows="1" placeholder="'+ph+'"></textarea><button type="button" class="btn y" data-t="send">Enviar</button></div><p class="lg">🚫 Sem palavrões. Imagens com nudez ou conteúdo impróprio = banimento permanente.</p><input type="file" id="tcImg" accept="image/*" hidden>';
+}
+function tPendDraw(){
+  var b=$('tPend');if(!b)return;
+  b.innerHTML=T.pend?'<div class="pend"><img src="'+esc(T.pend)+'" alt="Foto a enviar"><button type="button" class="btn r s" data-t="rmpend">✕ Remover foto</button></div>':'';
+}
+function tMsgHtml(m){
+  var me=m.u===UN;
+  return '<div class="msg'+(me?' me':'')+'"><div class="au"><button type="button" class="lnk" data-t="prof" data-tu="'+esc(m.u)+'">'+esc(m.u)+'</button> · '+esc(tT(m.ts))+'</div>'+
+    (m.text?'<div class="tx">'+esc(m.text)+'</div>':'')+(safeImg(m.img)?'<img class="ci" alt="Foto enviada" src="'+esc(m.img)+'" data-t="zoom">':'')+
+    '<div class="ma">'+(!me?'<button type="button" data-t="repmsg" data-tid="'+m.id+'" aria-label="Denunciar">🚩</button>':'')+(me||isAdm()?'<button type="button" data-t="delmsg" data-tid="'+m.id+'" aria-label="Apagar">🗑</button>':'')+'</div></div>';
+}
+function tMsgsDraw(arr,emptyTxt){
+  var box=$('tMsgs');if(!box)return;
+  T.cache={};arr.forEach(function(m){T.cache[m.id]=m;});
+  var near=box.scrollHeight-box.scrollTop-box.clientHeight<90,first=!box.getAttribute('data-init');
+  box.innerHTML=arr.length?arr.map(tMsgHtml).join(''):'<div class="empty">'+emptyTxt+'</div>';
+  if(near||first){box.scrollTop=box.scrollHeight;box.setAttribute('data-init','1');}
+}
+function tChat(){
+  $('tBody').innerHTML='<div class="chat" id="tMsgs"><div class="empty">Carregando…</div></div>'+tComposer('Mensagem para todos…');
+  tPendDraw();
+  T.un.push(fbDb.collection('chatGlobal').orderBy('ts','desc').limit(40).onSnapshot(function(s){
+    tMsgsDraw(s.docs.map(function(d){var x=d.data({serverTimestamps:'estimate'});x.id=d.id;return x;}).reverse(),'Nenhuma mensagem ainda. Seja o primeiro!');
+  },function(e){var b=$('tMsgs');if(b)b.innerHTML='<div class="empty" style="color:#D7263D">'+esc(errMsg((e&&(e.code||e.message))||''))+'</div>';}));
+}
+function tOpenDm(peer){
+  if(peer===UN){toast('Essa é a sua conta 🙂');return;}
+  T.peer=peer;T.cid=[UN,peer].sort().join('__');T.s='dm';T.pend='';renderTrade();
+}
+function tDmSub(){
+  if(T.dmu){try{T.dmu();}catch(e){}T.dmu=null;}
+  var cid=T.cid;
+  T.dmu=fbDb.collection('dms').doc(cid).collection('msgs').orderBy('ts','desc').limit(40).onSnapshot(function(s){
+    tMsgsDraw(s.docs.map(function(d){var x=d.data({serverTimestamps:'estimate'});x.id=d.id;return x;}).reverse(),'Conversa nova. Mande a primeira mensagem!');
+    tMarkRead(cid);
+  },function(){tMsgsDraw([],'Conversa nova. Mande a primeira mensagem!');});
+}
+function tReadMap(){try{return JSON.parse(localStorage.getItem('gestgo.dmr')||'{}');}catch(e){return {};}}
+function tMarkRead(cid){var r=tReadMap();r[cid]=Date.now();try{localStorage.setItem('gestgo.dmr',JSON.stringify(r));}catch(e){}}
+function tDm(){
+  $('tBody').innerHTML='<div class="bar"><button type="button" class="btn o" data-t="go" data-ts="inbox">← Voltar</button><h2>✉️ '+esc(T.peer)+'</h2><button type="button" class="btn o s" data-t="prof" data-tu="'+esc(T.peer)+'">Perfil</button></div><div class="chat" id="tMsgs"><div class="empty">Carregando…</div></div>'+tComposer('Mensagem privada para '+esc(T.peer)+'…');
+  tPendDraw();tDmSub();
+}
+function tInbox(){
+  $('tBody').innerHTML='<div class="empty">Carregando…</div>';
+  T.un.push(fbDb.collection('dms').where('users','array-contains',UN).onSnapshot(function(s){
+    var b=$('tBody');if(!b||T.s!=='inbox')return;
+    var rd=tReadMap(),l=s.docs.map(function(d){var x=d.data({serverTimestamps:'estimate'});x.id=d.id;return x;}).sort(function(a,b2){return tms(b2.lastAt)-tms(a.lastAt);});
+    b.innerHTML=l.length?l.map(function(x){
+      var peer=x.users[0]===UN?x.users[1]:x.users[0],unread=x.lastBy!==UN&&tms(x.lastAt)>(rd[x.id]||0);
+      return '<button type="button" class="pcard" data-t="dm" data-tu="'+esc(peer)+'"><div class="av">'+esc(peer.charAt(0).toUpperCase())+'</div><div style="flex:1;min-width:0"><b>'+esc(peer)+'</b>'+(unread?' <span class="badge w">novo</span>':'')+'<div class="lg" style="margin:2px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(x.lastBy===UN?'Você: ':'')+esc(x.last||'')+' · '+esc(tT(x.lastAt))+'</div></div></button>';
+    }).join(''):'<div class="empty">Nenhuma conversa ainda. Abra o perfil de um jogador e toque em "Mandar mensagem".</div>';
+  },tFail));
+}
+function tSend(){
+  var ta=$('tcm');if(!ta)return;
+  var text=ta.value.trim();
+  if(!text&&!T.pend)return;
+  if(Date.now()-T.last<1200){toast('Calma! Espere um instante');return;}
+  if(text&&pf(text)){toast('Sem palavrões, por favor 🙏');return;}
+  var ts=firebase.firestore.FieldValue.serverTimestamp(),d={u:UN,text:text,ts:ts},p;
+  if(T.pend)d.img=T.pend;
+  T.last=Date.now();
+  if(T.s==='chat')p=fbDb.collection('chatGlobal').add(d);
+  else{
+    var bt=fbDb.batch(),dr=fbDb.collection('dms').doc(T.cid);
+    bt.set(dr,{users:T.cid.split('__'),last:(text||'📷 Foto').slice(0,60),lastBy:UN,lastAt:ts},{merge:true});
+    bt.set(dr.collection('msgs').doc(),d);
+    p=bt.commit();
+  }
+  p.then(function(){
+    var t2=$('tcm');if(t2)t2.value='';T.pend='';tPendDraw();
+    if(T.s==='dm')tDmSub();
+  }).catch(tErr);
+}
+function tMsgPath(id){return T.s==='chat'?'chatGlobal/'+id:'dms/'+T.cid+'/msgs/'+id;}
+function tReport(kind,target,path,text,imgd){
+  if(!confirm('Denunciar este conteúdo ao administrador?'))return;
+  var d={by:UN,target:target,kind:kind,path:path,text:String(text||'').slice(0,200),createdAt:new Date().toISOString()};
+  if(safeImg(imgd))d.img=imgd;
+  fbDb.collection('reports').add(d).then(function(){toast('Denúncia enviada ao administrador');}).catch(tErr);
+}
+/* ---- Eventos da Janela de Troca ---- */
+document.addEventListener('click',function(e){
+  var el=e.target.closest?e.target.closest('[data-t]'):null;if(!el)return;
+  var a=el.getAttribute('data-t'),id=el.getAttribute('data-tid'),tu=el.getAttribute('data-tu'),tp=el.getAttribute('data-tp');
+  if(a==='login'){openAuthModal();return;}
+  if(a==='go'){T.s=el.getAttribute('data-ts');T.pend='';renderTrade();return;}
+  if(a==='retry'){tDraw();return;}
+  if(a==='prof'){T.user=tu;T.s='profile';renderTrade();window.scrollTo(0,0);return;}
+  if(a==='dm'){tOpenDm(tu);return;}
+  if(a==='code'){tCodeModal();return;}
+  if(a==='codesave'){tCodeSave();return;}
+  if(a==='copy'){copyTxt(tCode(tp));return;}
+  if(a==='add'){tAdd(el.getAttribute('data-tk'));return;}
+  if(a==='tiflag'){TI.t=TI.t.indexOf(tp)>=0?TI.t.replace(tp,''):TI.t+tp;el.setAttribute('aria-pressed',TI.t.indexOf(tp)>=0?'true':'false');return;}
+  if(a==='tisp'){var sid=+tp;TI.dex=sid;TI.name=SPN[sid];TI.fk='';TI.sp=0;$('tiName').value=TI.name;$('tiSug').innerHTML='';$('tiPick').textContent='✓ '+TI.name+' #'+sid;$('tiForm').innerHTML=tiForms();return;}
+  if(a==='tiph'){if(tImgOk())$('tiFile').click();return;}
+  if(a==='tiphrm'){TI.img='';tiPh();return;}
+  if(a==='tisave'){tiSave();return;}
+  if(a==='mine'){tMine();return;}
+  if(a==='tiback'){tiDraw();return;}
+  if(a==='mpick'){tMinePick(tp);return;}
+  if(a==='zoom'){if(el.src){$('lbImg').src=el.src;$('lb').className='modal on';}return;}
+  if(a==='photo'){
+    fbDb.collection('tradePhotos').doc(id).get().then(function(d){
+      var x=d.exists?d.data().img:null;
+      if(safeImg(x)){$('lbImg').src=x;$('lb').className='modal on';}else toast('Foto indisponível');
+    }).catch(tErr);return;
+  }
+  if(a==='delitem'){
+    var it=T.pi.filter(function(x){return x.id===id;})[0];
+    if(!it||!confirm('Remover "'+it.name+'" da Janela de Troca?'))return;
+    var bt=fbDb.batch();bt.delete(fbDb.collection('tradeItems').doc(id));if(it.ph)bt.delete(fbDb.collection('tradePhotos').doc(id));
+    bt.commit().then(function(){toast('Removido');tProfile();}).catch(tErr);return;
+  }
+  if(a==='repitem'){
+    var it2=T.pi.filter(function(x){return x.id===id;})[0];if(!it2)return;
+    if(it2.ph){fbDb.collection('tradePhotos').doc(id).get().then(function(d){tReport('item',T.user,'tradeItems/'+id,it2.name+(it2.note?' · '+it2.note:''),d.exists?d.data().img:'');}).catch(function(){tReport('item',T.user,'tradeItems/'+id,it2.name,'');});}
+    else tReport('item',T.user,'tradeItems/'+id,it2.name+(it2.note?' · '+it2.note:''),'');
+    return;
+  }
+  if(a==='pickimg'){if(tImgOk())$('tcImg').click();return;}
+  if(a==='rmpend'){T.pend='';tPendDraw();return;}
+  if(a==='send'){tSend();return;}
+  if(a==='delmsg'){if(!confirm('Apagar esta mensagem?'))return;fbDb.doc(tMsgPath(id)).delete().then(function(){toast('Apagada');}).catch(tErr);return;}
+  if(a==='repmsg'){var m=T.cache[id];if(!m)return;tReport(T.s==='chat'?'gmsg':'dm',m.u,tMsgPath(id),m.text,m.img);return;}
+});
+document.addEventListener('input',function(e){
+  var t=e.target;
+  if(t.id==='tq'){T.q=t.value;tPlList();}
+  else if(t.id==='tmq'){tMineList();}
+  else if(t.id==='tiName'&&TI){
+    TI.dex=0;TI.name='';TI.fk='';$('tiPick').textContent='';tiSuggest(t.value);
+    var q9=norm(t.value).trim(),ex=q9&&SP.filter(function(x){return norm(x.name)===q9;})[0];
+    if(ex){TI.dex=ex.id;TI.name=ex.name;$('tiPick').textContent='✓ '+ex.name+' #'+ex.id;}
+    $('tiForm').innerHTML=tiForms();
+  }
+});
+document.addEventListener('change',function(e){
+  var t=e.target,f=t.files&&t.files[0];
+  if(t.id==='tcImg'&&f){
+    tCompress(f,1000,220000).then(function(d){T.pend=d;tPendDraw();}).catch(function(){toast('Não consegui usar essa imagem (use JPG ou PNG)');});
+    t.value='';
+  }else if(t.id==='tiFile'&&f&&TI){
+    tCompress(f,1600,600000).then(function(d){TI.img=d;tiPh();}).catch(function(){toast('Não consegui usar essa imagem (use JPG ou PNG)');});
+    t.value='';
+  }
+});
+document.addEventListener('keydown',function(e){
+  if(e.target.id==='tcm'&&e.key==='Enter'&&!e.shiftKey){e.preventDefault();tSend();}
+});
+function admPurge(u){
+  return Promise.all([fbDb.collection('tradeItems').where('owner','==',u).get(),fbDb.collection('tradePhotos').where('owner','==',u).get(),fbDb.collection('chatGlobal').where('u','==',u).get()]).then(function(r){
+    var bt=fbDb.batch(),n=0;
+    r.forEach(function(s){s.docs.forEach(function(d){if(n<450){bt.delete(d.ref);n++;}});});
+    bt.delete(fbDb.collection('tradeProfiles').doc(u));
+    return bt.commit();
+  }).catch(function(){});
+}
+function admRepHtml(){
+  var l=ADM.reports||[];
+  var h='<div class="panel"><h3>🚩 Denúncias ('+l.length+')</h3><p>Conteúdo denunciado pelos jogadores. Nudez ou conteúdo impróprio: exclua o conteúdo e bana o jogador (isso apaga a conta dele).</p>';
+  l.forEach(function(r){
+    var ux=ADM.users.filter(function(x){return x.name===r.target;})[0];
+    h+='<div class="krow" style="align-items:flex-start"><div style="flex:1 1 220px"><b>'+esc(r.target)+'</b> <span class="lg">denunciado por '+esc(r.by)+' · '+esc(fmtD(r.createdAt))+' · '+esc(r.kind)+'</span><div>'+esc(r.text||'')+'</div>'+
+      (safeImg(r.img)?'<img src="'+esc(r.img)+'" data-t="zoom" alt="" style="max-height:140px;max-width:100%;border-radius:8px;margin-top:6px;cursor:zoom-in">':'')+'</div>'+
+      '<button class="btn o s" type="button" data-adm="repdel" data-id="'+esc(r.id)+'" data-p="'+esc(r.path)+'">Excluir conteúdo</button>'+
+      (ux?'<button class="btn r s" type="button" data-adm="deluser" data-u="'+esc(r.target)+'" data-uid="'+(ux.p?esc(ux.uid):'')+'" data-ver="'+esc(ux.ver)+'">🔨 Banir</button>':'')+
+      '<button class="btn o s" type="button" data-adm="repok" data-id="'+esc(r.id)+'">Dispensar</button></div>';
+  });
+  if(!l.length)h+='<p class="lg">Nenhuma denúncia.</p>';
+  return h+'</div>';
+}
+
 /* ---------- Navegação ---------- */
 function show(tab,accId){
-  if(tab==='adm'&&!isAdm())tab='home';V.tab=tab; if(accId){V.acc=accId;V.f=[];V.q='';V.mode='list';}
+  if(tab==='adm'&&!isAdm())tab='home';V.tab=tab;if(tab!=='trade')tStop(); if(accId){V.acc=accId;V.f=[];V.q='';V.mode='list';}
   var key=tab==='home'&&false?'':tab;
-  ['home','acc','all','who','bkp','adm'].forEach(function(x){$('v-'+x).className='view'+(x===tab?' on':'');});
+  ['home','acc','all','who','bkp','adm','trade'].forEach(function(x){$('v-'+x).className='view'+(x===tab?' on':'');});
   var nt=tab==='acc'?'home':tab, nb=document.querySelectorAll('nav button');
   for(var i=0;i<nb.length;i++)nb[i].setAttribute('aria-selected',nb[i].getAttribute('data-tab')===nt?'true':'false');
   $('fab').className='fab'+(tab==='acc'?' on':'');
@@ -1197,7 +1744,7 @@ function show(tab,accId){
 function draw(){
   var t=0;D.accounts.forEach(function(a){t+=a.mons.length;});
   $('sub').textContent=D.accounts.length+' contas · '+t+' Pokémon registrados';
-  if(V.tab==='home')renderHome();else if(V.tab==='acc')renderAcc();else if(V.tab==='all')renderAll();else if(V.tab==='who')renderWho();else if(V.tab==='adm')renderAdm();else renderBkp();
+  if(V.tab==='home')renderHome();else if(V.tab==='acc')renderAcc();else if(V.tab==='all')renderAll();else if(V.tab==='who')renderWho();else if(V.tab==='adm')renderAdm();else if(V.tab==='trade')renderTrade();else renderBkp();
 }
 
 /* ---------- Eventos ---------- */
@@ -1238,7 +1785,7 @@ document.addEventListener('click',function(e){
   if(b.id==='pwaInst'){$('md').className='modal';window.pwaInstall();return;}
   if(b.id==='pwGo'){doPw();return;}
   if(b.hasAttribute('data-adm')){admAct(b);return;}
-  if(b.id==='syncNow'){$('md').className='modal';toast('Sincronizando…');startSync().then(function(){toast('Sincronizado');});return;}
+  if(b.id==='syncNow'){$('md').className='modal';toast('Sincronizando…');startSync().then(function(){toast(SYNC==='err'?'Falhou: '+(SYNCERR||'erro'):'Sincronizado');});return;}
   if(b.id==='lgOut'){doLogout();return;}
   if(b.id==='phPick'){$('mFile').click();return;}
   if(b.id==='phRm'){M.file=null;M.rm=true;renderPh();return;}
