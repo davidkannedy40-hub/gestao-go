@@ -27,6 +27,8 @@
     "Criar conta", digite o usuario davidkannedy e a sua senha e deixe a CHAVE EM BRANCO.
     So o admin pode fazer isso, e so uma vez (depois o nome fica reservado).
   - A senha do admin NAO fica escrita neste arquivo.
+  - CADASTRO LIVRE: quem cria conta sem chave ganha 7 dias gratis. Depois disso so a Janela de Troca fecha
+    (as contas pessoais continuam). SEMPRE republique as regras abaixo quando este arquivo mudar.
   - Para mudar o nome do admin, troque ADMIN_USER no script e 'davidkannedy' nas regras.
 
 rules_version = '2';
@@ -78,6 +80,13 @@ service cloud.firestore {
                 && keyBefore(request.resource.data.key).username == request.resource.data.username
                 && request.resource.data.get('expiresAt', null) == keyBefore(request.resource.data.key).get('expiresAt', null))
             ))
+          ||
+          // cadastro livre (sem chave): 7 dias gratis de Janela de Troca
+          (request.resource.data.role == 'user'
+            && request.resource.data.username != 'davidkannedy'
+            && !('key' in request.resource.data)
+            && request.resource.data.expiresAt is timestamp
+            && request.resource.data.expiresAt <= request.time + duration.value(7, 'd') + duration.value(1, 'h'))
         );
       // admin renova o prazo de acesso de um usuario (so o campo expiresAt)
       allow update: if isAdmin() && resource.data.role != 'admin'
@@ -110,7 +119,7 @@ service cloud.firestore {
             && request.resource.data.uid == request.auth.uid
             && request.resource.data.ver == resource.data.ver
             && profileAfter().username == u
-            && keyAfter(profileAfter().key).type == 'register')
+            && (!('key' in profileAfter()) || keyAfter(profileAfter().key).type == 'register'))
           ||
           // recuperacao de senha com chave de recuperacao
           (resource.data.deleted == false
@@ -235,9 +244,10 @@ service cloud.firestore {
     }
 
     // Dados do app: cada pessoa so ve os proprios (o documento tem o nome do usuario)
+    // (continua funcionando depois dos 7 dias; so a Janela de Troca fecha)
     match /gestao/{id} {
-      allow read: if signedIn() && (request.auth.uid == id || (hasProfile() && me().username == id && notExpired()));
-      allow write: if hasProfile() && me().username == id && notExpired();
+      allow read: if signedIn() && (request.auth.uid == id || (hasProfile() && me().username == id));
+      allow write: if hasProfile() && me().username == id;
       allow delete: if isAdmin();
     }
   }
@@ -632,7 +642,6 @@ function doLogin(){
   }).then(function(c){
     setSession(c.user);
     return loadProfile(c.user.uid).then(function(p){
-      if(p&&isExpired(p))return fbAuth.signOut().catch(function(){}).then(function(){A.session=null;saveAuth();PROFILE=null;navRole();throw {code:'x-expired'};});
       if(p)return p;
       if(u===ADMIN_USER)return claimAdmin(c.user,u);
       return fbAuth.signOut().catch(function(){}).then(function(){A.session=null;saveAuth();throw {code:'x-noprofile'};});
@@ -691,8 +700,10 @@ function accessHtml(){
   if(isAdm()||!PROFILE)return '';
   var d=expDate(PROFILE);
   if(!d)return '<p>🔑 Sua key: <b>acesso permanente</b></p>';
-  var n=Math.ceil((d.getTime()-Date.now())/864e5),w=n<=7;
-  return '<div style="margin:8px 0;padding:10px 12px;border-radius:12px;background:'+(w?'#FFF3E0':'#EAF6EE')+'"><p style="margin:0">🔑 Sua key vale até <b>'+esc(fmtDay(d))+'</b> ('+(n<=0?'vence hoje':n===1?'falta 1 dia':'faltam '+n+' dias')+').</p><p style="margin:6px 0 8px;color:#5D6B82">Para renovar sem perder seus dados, chame o administrador.</p><button class="btn y s" id="admDm" type="button">💬 Falar com o admin para renovar</button></div>';
+  var ms=d.getTime()-Date.now(),ca=new Date(PROFILE.createdAt).getTime(),trial=!PROFILE.key&&Math.abs(d.getTime()-ca-7*864e5)<36e5;
+  if(ms<=0)return '<div style="margin:8px 0;padding:10px 12px;border-radius:12px;background:#FDE2E4"><p style="margin:0">'+(trial?'⏰ Seu teste grátis de 7 dias acabou.':'🔑 Seu acesso expirou em <b>'+esc(fmtDay(d))+'</b>.')+'</p><p style="margin:6px 0 0;color:#5D6B82">Você continua usando suas contas normalmente, mas não consegue mais abrir os outros jogadores na Janela de Troca. Para voltar, peça uma key ao administrador (<b>'+esc(ADMIN_USER)+'</b>).</p></div>';
+  var n=Math.ceil(ms/864e5),w=n<=7;
+  return '<div style="margin:8px 0;padding:10px 12px;border-radius:12px;background:'+(w?'#FFF3E0':'#EAF6EE')+'"><p style="margin:0">'+(trial?'🎁 Teste grátis até <b>':'🔑 Seu acesso vale até <b>')+esc(fmtDay(d))+'</b> ('+(n<=0?'vence hoje':n===1?'falta 1 dia':'faltam '+n+' dias')+').</p><p style="margin:6px 0 8px;color:#5D6B82">Depois dessa data você continua usando suas contas, mas não consegue mais abrir os outros jogadores na Janela de Troca. Para renovar sem perder seus dados, chame o administrador.</p><button class="btn y s" id="admDm" type="button">💬 Falar com o admin para renovar</button></div>';
 }
 function unlock(x){LOCK=false;return x;}
 function loadProfile(uid){return fbDb.collection('users').doc(uid).get().then(function(s){PROFILE=s.exists?s.data():null;navRole();return PROFILE;});}
@@ -715,13 +726,12 @@ function resume(){
     if(!logged())return null;
     return loadProfile(A.session.uid).then(function(p){
       if(!p){forceOut('Sua conta foi removida ou aguarda recuperação. Fale com o administrador.');return null;}
-      if(isExpired(p)){forceOut('Seu acesso expirou. Peça uma nova chave ao administrador.');return null;}
       UN=p.username;A.owner=p.username;saveAuth();updateAuthBtn();return startSync();
     });
   }).catch(function(){navRole();return startSync();});
 }
 function claimWithKey(u,pw,k,kind){
-  var isAd=(u===ADMIN_USER&&kind==='register'),ver=0,wasDel=false,created=false,uid=null,p=null;
+  var isAd=(u===ADMIN_USER&&kind==='register'),trial=(kind==='register'&&u!==ADMIN_USER&&!k),ver=0,wasDel=false,created=false,uid=null,p=null;
   if(kind==='reset'&&u===ADMIN_USER){toast('A senha do administrador se troca em "Alterar senha" ou pelo console do Firebase');return Promise.resolve();}
   if(LOCK)return Promise.resolve();LOCK=true;
   return fbDb.collection('usernames').doc(u).get().then(function(s){
@@ -735,8 +745,8 @@ function claimWithKey(u,pw,k,kind){
     });
   }).then(function(c){
     uid=c.user.uid;
-    var kr=fbDb.collection('keys').doc(k);
-    var chk=isAd?Promise.resolve(null):kr.get().then(function(ks){
+    var kr=(isAd||trial)?null:fbDb.collection('keys').doc(k);
+    var chk=(isAd||trial)?Promise.resolve(null):kr.get().then(function(ks){
       var d=ks.exists?ks.data():null;
       if(!d||d.used||d.type!==kind||(kind==='reset'&&d.username!==u))throw {code:'x-badkey'};
       return d;
@@ -745,10 +755,11 @@ function claimWithKey(u,pw,k,kind){
       var b=fbDb.batch(),now=new Date().toISOString(),ur=fbDb.collection('usernames').doc(u);
       p={username:u,role:isAd?'admin':'user',createdAt:now};
       if(!isAd){
-        p.key=k;
+        if(trial)p.expiresAt=firebase.firestore.Timestamp.fromDate(new Date(Date.now()+7*864e5));
+        else{p.key=k;
         if(kind==='register'&&kd.days>0)p.expiresAt=firebase.firestore.Timestamp.fromDate(new Date(Date.now()+kd.days*864e5));
         else if(kind==='reset'&&kd.expiresAt)p.expiresAt=kd.expiresAt;
-        b.update(kr,{used:true,usedBy:uid,usedByName:u,usedAt:now});}
+        b.update(kr,{used:true,usedBy:uid,usedByName:u,usedAt:now});}}
       b.set(fbDb.collection('users').doc(uid),p);
       if(kind==='register'&&!wasDel)b.set(ur,{uid:uid,ver:0,deleted:false});
       else b.update(ur,{uid:uid,ver:ver,deleted:false});
@@ -765,7 +776,7 @@ function doRegister(){
   var u=cleanU($('lgU').value),pw=$('lgP').value||'',k=normKey($('lgK').value);
   if(u.length<3){toast('Usuário: mínimo 3 letras ou números');return;}
   if(pw.length<6){toast('A senha precisa ter 6 caracteres ou mais');return;}
-  if(u!==ADMIN_USER&&k.length!==24){toast('Digite a chave completa que o administrador te passou');return;}
+  if(u!==ADMIN_USER&&k&&k.length!==24){toast('A chave está incompleta. Digite ela inteira ou deixe em branco para o teste grátis');return;}
   claimWithKey(u,pw,k,'register');
 }
 function doReset(){
@@ -866,12 +877,12 @@ function showGate(mode){
   if(!CLOUD)return;
   mode=mode||'in';GMODE=mode;
   var h='<div class="gbox"><div class="logo">✨</div><h2>Minhas Contas GO</h2>';
-  if(mode==='in')h+='<p>Entre com seu usuário e senha. Para criar uma conta você precisa de uma chave do administrador.</p>';
-  else if(mode==='up')h+='<p>Crie sua conta com a chave que o administrador te passou. Cada chave vale para uma única conta.</p>';
+  if(mode==='in')h+='<p>Entre com seu usuário e senha. Quem cria uma conta nova ganha 7 dias grátis na Janela de Troca.</p>';
+  else if(mode==='up')h+='<p>Crie sua conta e ganhe 7 dias grátis na Janela de Troca. Se o administrador te passou uma chave, digite abaixo; se não, deixe em branco. Cada chave vale para uma única conta.</p>';
   else h+='<p>Defina uma nova senha usando a chave de recuperação que o administrador te passou.</p>';
   h+='<input class="in" id="lgU" placeholder="Usuário" autocomplete="username" autocapitalize="none" maxlength="20">'+
      '<input class="in" id="lgP" type="password" placeholder="'+(mode==='in'?'Senha':'Senha (mínimo 6 caracteres)')+'" autocomplete="'+(mode==='in'?'current-password':'new-password')+'">';
-  if(mode!=='in')h+='<input class="in" id="lgK" placeholder="Chave (XXXX-XXXX-XXXX-XXXX-XXXX)" autocapitalize="characters" autocomplete="off" maxlength="30">';
+  if(mode!=='in')h+='<input class="in" id="lgK" placeholder="'+(mode==='up'?'Chave (opcional)':'Chave (XXXX-XXXX-XXXX-XXXX-XXXX)')+'" autocapitalize="characters" autocomplete="off" maxlength="30">';
   if(mode==='in')h+='<div class="row"><button class="btn y" id="lgIn" type="button">Entrar</button><button class="btn o" id="lgGoUp" type="button">Criar conta</button></div><p class="lg"><button class="btn o s" id="lgGoRec" type="button">Esqueci minha senha</button></p>';
   else if(mode==='up')h+='<div class="row"><button class="btn y" id="lgUp" type="button">Criar conta</button><button class="btn o" id="lgBack" type="button">Voltar</button></div>';
   else h+='<div class="row"><button class="btn y" id="lgRec" type="button">Redefinir senha</button><button class="btn o" id="lgBack" type="button">Voltar</button></div>';
@@ -935,7 +946,7 @@ function renderPh(){
 function renderHome(){
   var tot=0,sh=0,uniq={};
   D.accounts.forEach(function(a){a.mons.forEach(function(m){tot++;if(m.sh==='y'){sh++;uniq[m.name]=1;}});});
-  var h='<div class="row" style="margin-bottom:12px"><button type="button" class="btn y" data-import="">📋 Importar lista de Pokémon</button></div><div class="stats"><div class="stat"><b>'+tot+'</b><span>Pokémon no total</span></div>'+
+  var h='<div class="row" style="margin-bottom:12px"><button type="button" class="btn y" data-import="">📋 Importar lista de Pokémon</button><button type="button" class="btn y" data-newacc="1">➕ Nova conta</button></div><div class="stats"><div class="stat"><b>'+tot+'</b><span>Pokémon no total</span></div>'+
     '<div class="stat"><b>'+sh+'</b><span>✨ Brilhantes</span></div>'+
     '<button type="button" class="stat" data-uniq="1" style="text-align:left;cursor:pointer"><b>'+Object.keys(uniq).length+'</b><span>✨ Espécies diferentes · ver ›</span></button></div><div class="accgrid">';
   D.accounts.forEach(function(a){
@@ -1448,6 +1459,26 @@ function openAcc(){
   $('md').className='modal on';
 }
 
+/* ---------- Nova conta ---------- */
+var NA={color:''};
+function newAccH(){
+  return '<h2>Nova conta</h2><label for="naName">Nome da conta (como você chama)</label><input class="in" id="naName" maxlength="30" value="'+esc(NA.name||'')+'" placeholder="Ex.: Conta 14">'+
+   '<label for="naNick">Nick no jogo</label><input class="in" id="naNick" maxlength="30" value="'+esc(NA.nick||'')+'">'+
+   '<label for="naCode">Código de amigo</label><input class="in" id="naCode" maxlength="16" inputmode="numeric" value="'+esc(NA.code||'')+'">'+
+   '<label for="naNote">Observações</label><input class="in" id="naNote" maxlength="120" value="'+esc(NA.note||'')+'">'+
+   '<label>Cor</label><div class="chips">'+COLORS.map(function(c){return '<button type="button" class="chip" data-ncolor="'+c+'" aria-pressed="'+(NA.color===c)+'" style="background:'+c+';border-color:'+(NA.color===c?'#16213A':c)+';width:36px;height:36px;padding:0" aria-label="Cor"></button>';}).join('')+'</div>'+
+   '<div class="row" style="margin-top:14px"><button class="btn y" id="naSave" type="button">Adicionar conta</button><button class="btn o" id="mNo" type="button">Cancelar</button></div>';
+}
+function openNewAcc(){
+  NA={color:COLORS[D.accounts.length%COLORS.length],name:'Conta '+(D.accounts.length+1),nick:'',code:'',note:''};
+  $('mdBox').innerHTML=newAccH();
+  $('md').className='modal on';
+  var n=$('naName');if(n){n.focus();n.select();}
+}
+function naKeep(){
+  ['Name','Nick','Code','Note'].forEach(function(k){var e=$('na'+k);if(e)NA[k.toLowerCase()]=e.value;});
+}
+
 /* ---------- Janela de Troca ---------- */
 var T={s:'players',user:'',players:null,items:null,me:null,pp:null,pi:[],cid:'',peer:'',un:[],dmu:null,pend:'',q:'',f:[],k:'all',fop:'and',last:0,cache:{}};
 var TI=null,BADSET={};
@@ -1462,7 +1493,7 @@ function pf(t){
   if(run.length>1)toks.push(run);
   return toks.some(function(w){var c=cz(w);return !!(BADSET[c]||BADSET[c.replace(/s$/,'')]);});
 }
-function tOk(){return CLOUD&&logged()&&!!PROFILE;}
+function tOk(){return CLOUD&&logged()&&!!PROFILE&&!isExpired(PROFILE);}
 function tStop(){
   (T.un||[]).forEach(function(f){try{f();}catch(e){}});T.un=[];
   if(T.dmu){try{T.dmu();}catch(e){}T.dmu=null;}
@@ -1503,6 +1534,11 @@ function tCompress(file,maxDim,maxLen){
 }
 function renderTrade(){
   var el=$('v-trade');if(!el)return;
+  if(CLOUD&&logged()&&PROFILE&&isExpired(PROFILE)){
+    tStop();
+    el.innerHTML='<div class="panel"><h3>🔒 Janela de Troca bloqueada</h3><p>Seu período de acesso acabou, então não dá mais para abrir os outros jogadores e ver o que eles querem trocar. Suas contas e Pokémon continuam funcionando normalmente.</p><p>Para liberar de novo, peça uma key ao administrador (<b>'+esc(ADMIN_USER)+'</b>).</p></div>';
+    return;
+  }
   if(!tOk()){
     tStop();
     el.innerHTML='<div class="panel"><h3>🔄 Janela de Troca</h3><p>Entre na sua conta para ver os jogadores, combinar trocas e conversar.</p><button class="btn y" type="button" data-t="login">'+(CLOUD?'Entrar':'Como ativar o login')+'</button></div>';
@@ -1950,6 +1986,13 @@ document.addEventListener('click',function(e){
   if(b.hasAttribute('data-acc')){show('acc',b.getAttribute('data-acc'));return;}
   if(b.hasAttribute('data-back')){show('home');return;}
   if(b.hasAttribute('data-editacc')){openAcc();return;}
+  if(b.hasAttribute('data-newacc')){openNewAcc();return;}
+  if(b.hasAttribute('data-ncolor')){naKeep();NA.color=b.getAttribute('data-ncolor');$('mdBox').innerHTML=newAccH();return;}
+  if(b.id==='naSave'){
+    naKeep();
+    var nn=(NA.name||'').trim()||('Conta '+(D.accounts.length+1));
+    var na={id:'a'+uid(),name:nn,nick:(NA.nick||'').trim(),code:(NA.code||'').trim(),note:(NA.note||'').trim(),color:NA.color||COLORS[0],mons:[]};
+    D.accounts.push(na);save();$('md').className='modal';toast('Conta adicionada');draw();return;}
   if(b.id==='fab'){openMon(V.acc,null);return;}
   if(b.hasAttribute('data-mon')){openMon(V.acc,b.getAttribute('data-mon'));return;}
   if(b.hasAttribute('data-f')){togF(V.f,b.getAttribute('data-f'));syncChips('data-f',V.f);drawList();return;}
