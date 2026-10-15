@@ -524,13 +524,20 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){retur
 function norm(s){return String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
 var tt;function toast(m){var t=$('toast');t.textContent=m;t.className='toast on';clearTimeout(tt);tt=setTimeout(function(){t.className='toast';},2200);}
 function acc(id){return D.accounts.filter(function(a){return a.id===id;})[0];}
-function sprite(m){if(m.fk==='armored')return ARMOR;var pu=goiUrl(m);if(pu)return pu;return SPR+(m.sh==='n'?'':'shiny/')+(m.sp||m.dex)+'.png';}
+/* Imagens do jogo para Gigamax, Dinamax e Sombrio (Pokémon GO Hub: imagens do jogo; fallback = GameInfo / PokeAPI) */
+function ghUrl(m){var d=+m.dex;if(!d||m.fk==='armored')return '';var p3=d>999?String(d):('00'+d).slice(-3),sh=m.sh!=='n',B='https://db.pokemongohub.net/images/';
+  if(m.fk==='gmax')return B+'ingame/normal/pm'+d+'.fGIGANTAMAX'+(sh?'.s':'')+'.icon.png';
+  if(m.fk==='dmax'&&!sh)return B+'official/detail/'+p3+'_dynamax.webp';
+  if(!m.fk&&!m.sp&&!sh&&(m.t||'').indexOf('S')>=0)return B+'official/detail/'+p3+'_shadow.webp';
+  return '';}
+function sprite(m){if(m.fk==='armored')return ARMOR;var gh=ghUrl(m);if(gh)return gh;var pu=goiUrl(m);if(pu)return pu;return SPR+(m.sh==='n'?'':'shiny/')+(m.sp||m.dex)+'.png';}
 function img(m,cls){
   if(m.fk==='armored')return '<img class="art" alt="" src="'+ARMOR+'">';
   var b=m.sp||m.dex,fb=[];
   if(m.sh!=='n')fb.push(SPR+b+'.png');
   if(m.sp){if(m.sh!=='n')fb.push(SPR+'shiny/'+m.dex+'.png');fb.push(SPR+m.dex+'.png');}
   if(goiUrl(m)){fb=[];if(m.sh!=='n')fb.push(SPR+'shiny/'+m.dex+'.png');fb.push(SPR+m.dex+'.png');}
+  if(ghUrl(m)){var gu=goiUrl(m);fb=gu?[gu]:[];if(m.sh!=='n')fb.push(SPR+'shiny/'+(m.sp||m.dex)+'.png');fb.push(SPR+(m.sp||m.dex)+'.png');}
   return '<img loading="lazy" referrerpolicy="no-referrer" alt="" src="'+esc(sprite(m))+'" data-fb="'+esc(fb.join('|'))+'">';
 }
 function badges(m){
@@ -1275,10 +1282,12 @@ var GOI={"25":{"b":"f310","c":{"Assistente do Professor Willow":"f1623","Astrona
 (function(){var N={"90":{"b":"f316","c":{},"n":["f316"],"a":{}},"91":{"b":"f317","c":{},"n":["f317"],"a":{}},"92":{"b":"f920","c":{},"n":["f920"],"a":{}},"93":{"b":"f921","c":{},"n":["f921"],"a":{}},"94":{"b":"f466","c":{"Chapéu de festa":"f466c218","2020":"f465","Fantasia de gostosuras e travessuras":"f466c217","Festival Arrepiante":"f466c216"},"n":["f466","f466c218","f465","f466c217","f466c216"],"a":{"Festival Assombrado (Spooky Festival)":"Festival Arrepiante","Fantasia de Halloween":"Festival Arrepiante","Costume 2020":"2020","Fantasia de gostosuras e travessuras (Trick or Treat)":"Fantasia de gostosuras e travessuras"}},"95":{"b":"f318","c":{},"n":["f318"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
 /* Pokédex 96–101 (GameInfo, conferidos em pokemon.gameinfo.io/pt-br) */
 (function(){var N={"96":{"b":"f137","c":{},"n":["f137"],"a":{}},"97":{"b":"f140","c":{},"n":[],"a":{}},"98":{"b":"f319","c":{},"n":["f319"],"a":{}},"99":{"b":"f320","c":{},"n":["f320"],"a":{}},"100":{"b":"f587","c":{},"n":["f587"],"a":{}},"101":{"b":"f588","c":{},"n":["f588"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 102–103 (GameInfo, conferidos em pokemon.gameinfo.io/pt-br) */
+(function(){var N={"102":{"b":"f388","c":{},"n":["f388"],"a":{}},"103":{"b":"f10","c":{},"n":["f10"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
 function cosFix(dex,c){var g=GOI[+dex];if(!g||!c)return c;c=(g.a&&g.a[c])||c;return g.c[c]?c:'';}
 function goiGuess(d,note){var t=norm(note||'');if(!t)return '';var ns=Object.keys(d.c).sort(function(a,b){return b.length-a.length;});for(var i=0;i<ns.length;i++){if(t.indexOf(norm(ns[i]))>=0)return ns[i];}var k=d.k||{};var ks=Object.keys(k).sort(function(a,b){return b.length-a.length;});for(var j=0;j<ks.length;j++){if(t.indexOf(ks[j])>=0)return k[ks[j]];}return '';}
 /* Formas (GameInfo): GOF[dex][fk]=código da forma. Códigos conferidos nas páginas em pokemon.gameinfo.io/pt-br (miniaturas das formas). Dinamax usa a imagem base. */
-var GOF={"3":{"mega":"f436"},"6":{"mega-x":"f437","mega-y":"f438"},"9":{"mega":"f439"},"15":{"mega":"f440"},"18":{"mega":"f441"},"19":{"alola":"f11"},"20":{"alola":"f13"},"26":{"alola":"f15","mega-x":"f1633","mega-y":"f1634"},"27":{"alola":"f17"},"28":{"alola":"f19"},"37":{"alola":"f21"},"38":{"alola":"f23"},"50":{"alola":"f25"},"51":{"alola":"f27"},"52":{"alola":"f29","galar":"f407"},"53":{"alola":"f31"},"58":{"hisui":"f677"},"59":{"hisui":"f678"},"65":{"mega":"f684"},"71":{"mega":"f1611"},"74":{"alola":"f33"},"75":{"alola":"f35"},"76":{"alola":"f37"},"77":{"galar":"f443"},"78":{"galar":"f445"},"79":{"galar":"f543"},"80":{"galar":"f544","mega":"f573"},"83":{"galar":"f408"},"88":{"alola":"f39"},"89":{"alola":"f41"},"94":{"mega":"f464"},"100":{"hisui":"f601"},"101":{"hisui":"f617"}};
+var GOF={"3":{"mega":"f436"},"6":{"mega-x":"f437","mega-y":"f438"},"9":{"mega":"f439"},"15":{"mega":"f440"},"18":{"mega":"f441"},"19":{"alola":"f11"},"20":{"alola":"f13"},"26":{"alola":"f15","mega-x":"f1633","mega-y":"f1634"},"27":{"alola":"f17"},"28":{"alola":"f19"},"37":{"alola":"f21"},"38":{"alola":"f23"},"50":{"alola":"f25"},"51":{"alola":"f27"},"52":{"alola":"f29","galar":"f407"},"53":{"alola":"f31"},"58":{"hisui":"f677"},"59":{"hisui":"f678"},"65":{"mega":"f684"},"71":{"mega":"f1611"},"74":{"alola":"f33"},"75":{"alola":"f35"},"76":{"alola":"f37"},"77":{"galar":"f443"},"78":{"galar":"f445"},"79":{"galar":"f543"},"80":{"galar":"f544","mega":"f573"},"83":{"galar":"f408"},"88":{"alola":"f39"},"89":{"alola":"f41"},"94":{"mega":"f464"},"100":{"hisui":"f601"},"101":{"hisui":"f617"},"103":{"alola":"f9"}};
 function goiUrl(m){var d=m&&GOI[+m.dex];if(!d)return '';var gf=GOF[+m.dex],img=function(code){return 'https://pokemon.gameinfo.io/img/pokemon/256/p'+(+m.dex)+code+(m.sh==='n'?'':'s1')+'.png';};if(m.fk==='dmax'){m=Object.assign({},m,{fk:'',sp:0});}else if(m.fk){return (gf&&gf[m.fk])?img(gf[m.fk]):'';}else if(m.sp)return '';var c=csGet(m.note||'')||goiGuess(d,m.note),code=d.c[(d.a&&d.a[c])||c]||d.b;return 'https://pokemon.gameinfo.io/img/pokemon/256/p'+(+m.dex)+code+(((m.t||'').indexOf('F')>=0&&d.n.indexOf(code)<0)?'g2':'')+(m.sh==='n'?'':'s1')+'.png';}
 cosAdd([26],['Chapéu de festa','Chapéu festivo (Natal)','Gorro (beanie)','Estilo verão','Detetive','Coroa de flores','Chapéu de Ash','Chapéu de bruxa','Chapéu de fragmento','Roupa de festas (Holiday)']);
 cosAdd([172],['Chapéu festivo (Natal)','Chapéu de festa','Chapéu de Ash','Chapéu de bruxa','Estilo verão','Coroa de flores','Gorro de inverno']);
