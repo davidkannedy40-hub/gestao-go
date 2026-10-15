@@ -530,21 +530,23 @@ var tt;function toast(m){var t=$('toast');t.textContent=m;t.className='toast on'
 function acc(id){return D.accounts.filter(function(a){return a.id===id;})[0];}
 /* Imagens do jogo para Gigamax, Dinamax e Sombrio (Pokémon GO Hub: imagens do jogo; fallback = GameInfo / PokeAPI) */
 function ghUrl(m){var d=+m.dex;if(!d||m.fk==='armored')return '';var p3=d>999?String(d):('00'+d).slice(-3),sh=m.sh!=='n',B='https://db.pokemongohub.net/images/';
-  if(/(^|-)gmax$/.test(m.fk||'')&&!/-gmax$/.test(m.fk))return B+'ingame/normal/pm'+d+'.fGIGANTAMAX'+(sh?'.s':'')+'.icon.png';
-  if(m.fk==='dmax'&&!sh)return B+'official/detail/'+p3+'_dynamax.webp';
-  if(!m.fk&&!m.sp&&!sh&&(m.t||'').indexOf('S')>=0)return B+'official/detail/'+p3+'_shadow.webp';
+  if(m.fk==='gmax')return sh?B+'ingame/normal/pm'+d+'.fGIGANTAMAX.s.icon.png':B+'official/full/'+p3+'_gmax.webp';
+  if(m.fk==='dmax'&&!sh)return B+'official/full/'+p3+'_dynamax.webp';
+  if(!m.fk&&!m.sp&&!sh&&(m.t||'').indexOf('S')>=0)return B+'official/full/'+p3+'_shadow.webp';
   return '';}
 function ghAlt(m){var u=ghUrl(m);if(!u)return '';var i=u.indexOf('/images/');return 'https://db.pokemongohub.net/_next/image?url='+encodeURIComponent(u.slice(i))+'&w=256&q=75';}
-function sprite(m){if(m.fk==='armored')return ARMOR;var pu=goiUrl(m);if(pu)return pu;return SPR+(m.sh==='n'?'':'shiny/')+(m.sp||m.dex)+'.png';}
+function sprite(m){if(m.fk==='armored')return ARMOR;var hu=ghUrl(m);if(hu)return hu;var pu=goiUrl(m);if(pu)return pu;return SPR+(m.sh==='n'?'':'shiny/')+(m.sp||m.dex)+'.png';}
 function auraOf(m){var t=m.t||'',k=kindOf(m.fk);if(k==='dmax'||t.indexOf('D')>=0)return 'ax-d';if(k==='gmax')return 'ax-g';if(t.indexOf('S')>=0)return 'ax-s';if(t.indexOf('L')>=0)return 'ax-l';return '';}
 function img(m,cls){
   if(m.fk==='armored')return '<img class="art" alt="" src="'+ARMOR+'">';
   var b=m.sp||m.dex,fb=[];
   if(m.sh!=='n')fb.push(SPR+b+'.png');
   if(m.sp){if(m.sh!=='n')fb.push(SPR+'shiny/'+m.dex+'.png');fb.push(SPR+m.dex+'.png');}
-  if(goiUrl(m)){fb=[];if(m.sh!=='n')fb.push(SPR+'shiny/'+m.dex+'.png');fb.push(SPR+m.dex+'.png');}
-  var ax=auraOf(m);
-  return '<img loading="lazy" referrerpolicy="no-referrer" alt=""'+(ax?' class="'+ax+'"':'')+' src="'+esc(sprite(m))+'" data-fb="'+esc(fb.join('|'))+'">';
+  var gu=ghUrl(m),pu=goiUrl(m);
+  if(pu){fb=[];if(m.sh!=='n')fb.push(SPR+'shiny/'+m.dex+'.png');fb.push(SPR+m.dex+'.png');}
+  if(gu&&pu)fb.unshift(pu);
+  var ax=auraOf(m),useAx=ax&&!(gu&&m.sh==='n');
+  return '<img loading="lazy" referrerpolicy="no-referrer" alt=""'+(useAx?' class="'+ax+'"':'')+(gu&&ax&&!useAx?' data-ax="'+ax+'"':'')+' src="'+esc(sprite(m))+'" data-fb="'+esc(fb.join('|'))+'">';
 }
 function badges(m){
   var b=(m.sh==='y'?'✨':m.sh==='p'?'❓':''),kd=kindOf(m.fk);b+=kd==='mega'?'🧬':kd==='gmax'?'🌋':kd==='dmax'&&m.t.indexOf('D')<0?'🔴':kd==='alt'?'🔀':kd==='reg'?'🌍':'';
@@ -2156,7 +2158,7 @@ function draw(){
 }
 
 /* ---------- Eventos ---------- */
-document.addEventListener('error',function(e){var t=e.target;if(!t||t.tagName!=='IMG')return;var fb=t.getAttribute('data-fb');if(!fb){if(t.hasAttribute('data-fb'))t.style.visibility='hidden';return;}var l=fb.split('|'),nx=l.shift();t.setAttribute('data-fb',l.join('|'));t.src=nx;},true);
+document.addEventListener('error',function(e){var t=e.target;if(!t||t.tagName!=='IMG')return;var fb=t.getAttribute('data-fb');if(!fb){if(t.hasAttribute('data-fb'))t.style.visibility='hidden';return;}var l=fb.split('|'),nx=l.shift();t.setAttribute('data-fb',l.join('|'));var ax=t.getAttribute('data-ax');if(ax){t.className=ax;t.removeAttribute('data-ax');}t.src=nx;},true);
 document.addEventListener('click',function(e){
   var b=e.target.closest?e.target.closest('button'):null;
   if(e.target.id==='lb'||e.target.id==='lbImg'){$('lb').className='modal';return;}
