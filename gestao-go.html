@@ -529,26 +529,25 @@ function norm(s){return String(s).toLowerCase().normalize('NFD').replace(/[\u030
 var tt;function toast(m){var t=$('toast');t.textContent=m;t.className='toast on';clearTimeout(tt);tt=setTimeout(function(){t.className='toast';},2200);}
 function acc(id){return D.accounts.filter(function(a){return a.id===id;})[0];}
 /* Imagens do jogo para Gigamax, Dinamax e Sombrio (Pokémon GO Hub: imagens do jogo; fallback = GameInfo / PokeAPI) */
-function ghUrl(m){var d=+m.dex;if(!d||m.fk==='armored')return '';var p3=d>999?String(d):('00'+d).slice(-3),sh=m.sh!=='n',B='https://db.pokemongohub.net/images/';
-  if(m.fk==='gmax')return sh?B+'ingame/normal/pm'+d+'.fGIGANTAMAX.s.icon.png':B+'official/full/'+p3+'_gmax.webp';
-  if(m.fk==='dmax'&&!sh)return B+'official/full/'+p3+'_dynamax.webp';
-  if(!m.fk&&!m.sp&&!sh&&(m.t||'').indexOf('S')>=0)return B+'official/full/'+p3+'_shadow.webp';
-  return '';}
+function ghList(m){var d=+m.dex;if(!d||m.fk==='armored')return [];var p3=d>999?String(d):('00'+d).slice(-3),sh=m.sh!=='n',B='https://db.pokemongohub.net/images/',o=function(f){return [B+'official/full/'+p3+'_'+f+'.webp',B+'official/detail/'+p3+'_'+f+'.webp',B+'official/thumb/'+p3+'_'+f+'.webp'];};
+  if(m.fk==='gmax')return sh?[B+'ingame/normal/pm'+d+'.fGIGANTAMAX.s.icon.png']:o('gmax');
+  if(m.fk==='dmax'&&!sh)return o('dynamax');
+  if(!m.fk&&!m.sp&&!sh&&(m.t||'').indexOf('S')>=0)return o('shadow');
+  return [];}
+function ghUrl(m){return ghList(m)[0]||'';}
 function ghBase(m){var d=+m.dex;if(!d||m.fk||m.sp)return '';var p3=d>999?String(d):('00'+d).slice(-3),B='https://db.pokemongohub.net/images/';return m.sh!=='n'?B+'ingame/normal/pm'+d+'.s.icon.png':B+'official/full/'+p3+'.webp';}
 function ghAlt(m){var u=ghUrl(m);if(!u)return '';var i=u.indexOf('/images/');return 'https://db.pokemongohub.net/_next/image?url='+encodeURIComponent(u.slice(i))+'&w=256&q=75';}
-function sprite(m){if(m.fk==='armored')return ARMOR;var hu=ghUrl(m);if(hu)return hu;var pu=goiUrl(m);if(pu)return pu;var gb=ghBase(m);if(gb)return gb;return SPR+(m.sh==='n'?'':'shiny/')+(m.sp||m.dex)+'.png';}
+function ghProxy(u){var i=u.indexOf('/images/');return i<0?'':'https://db.pokemongohub.net/_next/image?url='+encodeURIComponent(u.slice(i))+'&w=384&q=75';}
+function imgChain(m){var c=[],add=function(u){if(u&&c.indexOf(u)<0)c.push(u);},b=m.sp||m.dex,g=ghList(m);g.forEach(add);g.forEach(function(u){add(ghProxy(u));});add(goiUrl(m));add(ghBase(m));
+  if(m.sh!=='n'){add(SPR+'shiny/'+b+'.png');if(m.sp)add(SPR+'shiny/'+m.dex+'.png');}
+  add(SPR+b+'.png');if(m.sp)add(SPR+m.dex+'.png');return c;}
+function sprite(m){if(m.fk==='armored')return ARMOR;return imgChain(m)[0];}
 function auraOf(m){var t=m.t||'',k=kindOf(m.fk);if(k==='dmax'||t.indexOf('D')>=0)return 'ax-d';if(k==='gmax')return 'ax-g';if(t.indexOf('S')>=0)return 'ax-s';if(t.indexOf('L')>=0)return 'ax-l';return '';}
 function img(m,cls){
   if(m.fk==='armored')return '<img class="art" alt="" src="'+ARMOR+'">';
-  var b=m.sp||m.dex,fb=[];
-  if(m.sh!=='n')fb.push(SPR+b+'.png');
-  if(m.sp){if(m.sh!=='n')fb.push(SPR+'shiny/'+m.dex+'.png');fb.push(SPR+m.dex+'.png');}
-  var gu=ghUrl(m),pu=goiUrl(m);
-  if(pu){fb=[];if(m.sh!=='n')fb.push(SPR+'shiny/'+m.dex+'.png');fb.push(SPR+m.dex+'.png');}
-  var gb=ghBase(m);if(pu&&gb)fb.unshift(gb);
-  if(gu&&pu)fb.unshift(pu);
+  var ch=imgChain(m),gu=ghList(m).length>0;
   var ax=auraOf(m),useAx=ax&&!(gu&&m.sh==='n');
-  return '<img loading="lazy" referrerpolicy="no-referrer" alt=""'+(useAx?' class="'+ax+'"':'')+(gu&&ax&&!useAx?' data-ax="'+ax+'"':'')+' src="'+esc(sprite(m))+'" data-fb="'+esc(fb.join('|'))+'">';
+  return '<img loading="lazy" referrerpolicy="no-referrer" alt=""'+(useAx?' class="'+ax+'"':'')+(gu&&ax&&!useAx?' data-ax="'+ax+'"':'')+' src="'+esc(ch[0])+'" data-fb="'+esc(ch.slice(1).join('|'))+'">';
 }
 function badges(m){
   var b=(m.sh==='y'?'✨':m.sh==='p'?'❓':''),kd=kindOf(m.fk);b+=kd==='mega'?'🧬':kd==='gmax'?'🌋':kd==='dmax'&&m.t.indexOf('D')<0?'🔴':kd==='alt'?'🔀':kd==='reg'?'🌍':'';
@@ -1325,16 +1324,47 @@ var GOI={"25":{"b":"f310","c":{"Assistente do Professor Willow":"f1623","Astrona
 (function(){var N={"225":{"b":"f341","c":{"Inverno 2020":"f481"},"n":["f341","f481"],"a":{}},"226":{"b":"f965","c":{},"n":["f965"],"a":{}},"227":{"b":"f459","c":{},"n":["f459"],"a":{}},"228":{"b":"f178","c":{},"n":["f178"],"a":{}},"229":{"b":"f181","c":{},"n":[],"a":{}},"230":{"b":"f510","c":{},"n":["f510"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
 /* Pokédex 231–236 (GameInfo) */
 (function(){var N={"231":{"b":"f966","c":{},"n":["f966"],"a":{}},"232":{"b":"f967","c":{},"n":[],"a":{}},"233":{"b":"f342","c":{},"n":["f342"],"a":{}},"234":{"b":"f343","c":{"Sinos":"f343c61"},"n":["f343","f343c61"],"a":{}},"235":{"b":"f968","c":{},"n":["f968"],"a":{}},"236":{"b":"f969","c":{},"n":["f969"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 237–242 (GameInfo) */
+(function(){var N={"237":{"b":"f970","c":{},"n":["f970"],"a":{}},"238":{"b":"f971","c":{"Laço":"f971c62"},"n":["f971","f971c62"],"a":{}},"239":{"b":"f972","c":{"Acessório do Spark":"f972c63"},"n":["f972","f972c63"],"a":{}},"240":{"b":"f973","c":{},"n":["f973"],"a":{}},"241":{"b":"f974","c":{},"n":["f974"],"a":{}},"242":{"b":"f975","c":{"Coroa de flores":"f975c64"},"n":["f975","f975c64"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 243–248 (GameInfo) */
+(function(){var N={"243":{"b":"f393","c":{},"n":["f393"],"a":{}},"244":{"b":"f394","c":{},"n":["f394"],"a":{}},"245":{"b":"f395","c":{},"n":["f395"],"a":{}},"246":{"b":"f253","c":{},"n":["f253"],"a":{}},"247":{"b":"f256","c":{},"n":["f256"],"a":{}},"248":{"b":"f259","c":{},"n":["f259"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 249–254 (GameInfo) */
+(function(){var N={"249":{"b":"f583","c":{"1º Aniversário":"f583c65"},"n":["f583","f583c65"],"a":{}},"250":{"b":"f546","c":{},"n":["f546"],"a":{}},"251":{"b":"f976","c":{},"n":["f976"],"a":{}},"252":{"b":"f977","c":{},"n":["f977"],"a":{}},"253":{"b":"f978","c":{},"n":["f978"],"a":{}},"254":{"b":"f979","c":{},"n":["f979"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 255–260 (GameInfo) */
+(function(){var N={"255":{"b":"f511","c":{},"n":[],"a":{}},"256":{"b":"f512","c":{},"n":[],"a":{}},"257":{"b":"f513","c":{},"n":[],"a":{}},"258":{"b":"f184","c":{},"n":["f184"],"a":{}},"259":{"b":"f187","c":{},"n":["f187"],"a":{}},"260":{"b":"f190","c":{},"n":["f190"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 261–266 (GameInfo) */
+(function(){var N={"261":{"b":"f514","c":{},"n":["f514"],"a":{}},"262":{"b":"f515","c":{},"n":["f515"],"a":{}},"263":{"b":"f345","c":{},"n":["f345"],"a":{}},"264":{"b":"f347","c":{},"n":["f347"],"a":{}},"265":{"b":"f980","c":{"Chapéu de festa":"f980c115"},"n":["f980","f980c115"],"a":{}},"266":{"b":"f981","c":{},"n":["f981"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 267–272 (GameInfo) */
+(function(){var N={"267":{"b":"f982","c":{},"n":[],"a":{}},"268":{"b":"f983","c":{},"n":["f983"],"a":{}},"269":{"b":"f984","c":{},"n":[],"a":{}},"270":{"b":"f985","c":{},"n":["f985"],"a":{}},"271":{"b":"f986","c":{},"n":["f986"],"a":{}},"272":{"b":"f987","c":{},"n":[],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 273–278 (GameInfo) */
+(function(){var N={"273":{"b":"f348","c":{},"n":["f348"],"a":{}},"274":{"b":"f349","c":{},"n":[],"a":{}},"275":{"b":"f350","c":{},"n":[],"a":{}},"276":{"b":"f988","c":{},"n":["f988"],"a":{}},"277":{"b":"f989","c":{},"n":["f989"],"a":{}},"278":{"b":"f990","c":{},"n":["f990"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 279–284 (GameInfo) */
+(function(){var N={"279":{"b":"f991","c":{},"n":["f991"],"a":{}},"280":{"b":"f193","c":{},"n":["f193"],"a":{}},"281":{"b":"f196","c":{"Cartola":"f196c116"},"n":["f196","f196c116"],"a":{}},"282":{"b":"f199","c":{"Chapéu inspirado em Meloetta":"f199c117"},"n":["f199","f199c117"],"a":{}},"283":{"b":"f992","c":{},"n":["f992"],"a":{}},"284":{"b":"f993","c":{},"n":["f993"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 285–290 (GameInfo) */
+(function(){var N={"285":{"b":"f994","c":{},"n":["f994"],"a":{}},"286":{"b":"f995","c":{},"n":["f995"],"a":{}},"287":{"b":"f996","c":{"Viseira":"f996c118"},"n":["f996","f996c118"],"a":{}},"288":{"b":"f997","c":{"Viseira":"f997c119"},"n":["f997","f997c119"],"a":{}},"289":{"b":"f998","c":{"Viseira":"f998c120"},"n":["f998","f998c120"],"a":{}},"290":{"b":"f999","c":{},"n":["f999"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 291–296 (GameInfo) */
+(function(){var N={"291":{"b":"f1000","c":{},"n":["f1000"],"a":{}},"292":{"b":"f1001","c":{},"n":["f1001"],"a":{}},"293":{"b":"f598","c":{},"n":["f598"],"a":{}},"294":{"b":"f599","c":{},"n":["f599"],"a":{}},"295":{"b":"f600","c":{},"n":["f600"],"a":{}},"296":{"b":"f516","c":{},"n":["f516"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 297–301 (GameInfo) */
+(function(){var N={"297":{"b":"f517","c":{},"n":["f517"],"a":{}},"298":{"b":"f1002","c":{},"n":["f1002"],"a":{}},"299":{"b":"f489","c":{},"n":["f489"],"a":{}},"300":{"b":"f1003","c":{},"n":["f1003"],"a":{}},"301":{"b":"f1004","c":{},"n":["f1004"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 302–304 (GameInfo, conferidos em pokemon.gameinfo.io) */
+(function(){var N={"302":{"b":"f351","c":{"2020":"f467"},"n":["f351","f467"],"a":{}},"303":{"b":"f396","c":{},"n":["f396"],"a":{}},"304":{"b":"f490","c":{},"n":["f490"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 305–307 (GameInfo, conferidos em pokemon.gameinfo.io/pt-br; 307 só o código base, lido na miniatura da página do Aggron) */
+(function(){var N={"305":{"b":"f491","c":{},"n":["f491"],"a":{}},"306":{"b":"f492","c":{},"n":["f492"],"a":{}},"307":{"b":"f1005","c":{},"n":["f1005"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
 function cosFix(dex,c){var g=GOI[+dex];if(!g||!c)return c;c=(g.a&&g.a[c])||c;return g.c[c]?c:'';}
 function goiGuess(d,note){var t=norm(note||'');if(!t)return '';var ns=Object.keys(d.c).sort(function(a,b){return b.length-a.length;});for(var i=0;i<ns.length;i++){if(t.indexOf(norm(ns[i]))>=0)return ns[i];}var k=d.k||{};var ks=Object.keys(k).sort(function(a,b){return b.length-a.length;});for(var j=0;j<ks.length;j++){if(t.indexOf(ks[j])>=0)return k[ks[j]];}return '';}
 /* Formas (GameInfo): GOF[dex][fk]=código da forma. Códigos conferidos nas páginas em pokemon.gameinfo.io/pt-br (miniaturas das formas). Dinamax usa a imagem base. */
-var GOF={"3":{"mega":"f436"},"6":{"mega-x":"f437","mega-y":"f438"},"9":{"mega":"f439"},"15":{"mega":"f440"},"18":{"mega":"f441"},"19":{"alola":"f11"},"20":{"alola":"f13"},"26":{"alola":"f15","mega-x":"f1633","mega-y":"f1634"},"27":{"alola":"f17"},"28":{"alola":"f19"},"37":{"alola":"f21"},"38":{"alola":"f23"},"50":{"alola":"f25"},"51":{"alola":"f27"},"52":{"alola":"f29","galar":"f407"},"53":{"alola":"f31"},"58":{"hisui":"f677"},"59":{"hisui":"f678"},"65":{"mega":"f684"},"71":{"mega":"f1611"},"74":{"alola":"f33"},"75":{"alola":"f35"},"76":{"alola":"f37"},"77":{"galar":"f443"},"78":{"galar":"f445"},"79":{"galar":"f543"},"80":{"galar":"f544","mega":"f573"},"83":{"galar":"f408"},"88":{"alola":"f39"},"89":{"alola":"f41"},"94":{"mega":"f464"},"100":{"hisui":"f601"},"101":{"hisui":"f617"},"103":{"alola":"f9"},"105":{"alola":"f43"},"110":{"galar":"f323"},"115":{"mega":"f668"},"121":{"mega":"f1635"},"122":{"galar":"f477"},"127":{"mega":"f768"},"128":{"paldea-combat-breed":"f1559","paldea-blaze-breed":"f1560","paldea-aqua-breed":"f1561"},"130":{"mega":"f502"},"142":{"mega":"f585"},"144":{"galar":"f672"},"145":{"galar":"f673"},"146":{"galar":"f674"},"149":{"mega":"f1612"},"150":{"mega-x":"f1636","mega-y":"f1637"}};
+var GOF={"3":{"mega":"f436"},"6":{"mega-x":"f437","mega-y":"f438"},"9":{"mega":"f439"},"15":{"mega":"f440"},"18":{"mega":"f441"},"19":{"alola":"f11"},"20":{"alola":"f13"},"26":{"alola":"f15","mega-x":"f1633","mega-y":"f1634"},"27":{"alola":"f17"},"28":{"alola":"f19"},"37":{"alola":"f21"},"38":{"alola":"f23"},"50":{"alola":"f25"},"51":{"alola":"f27"},"52":{"alola":"f29","galar":"f407"},"53":{"alola":"f31"},"58":{"hisui":"f677"},"59":{"hisui":"f678"},"65":{"mega":"f684"},"71":{"mega":"f1611"},"74":{"alola":"f33"},"75":{"alola":"f35"},"76":{"alola":"f37"},"77":{"galar":"f443"},"78":{"galar":"f445"},"79":{"galar":"f543"},"80":{"galar":"f544","mega":"f573"},"83":{"galar":"f408"},"88":{"alola":"f39"},"89":{"alola":"f41"},"94":{"mega":"f464"},"100":{"hisui":"f601"},"101":{"hisui":"f617"},"103":{"alola":"f9"},"105":{"alola":"f43"},"110":{"galar":"f323"},"115":{"mega":"f668"},"121":{"mega":"f1635"},"122":{"galar":"f477"},"127":{"mega":"f768"},"128":{"paldea-combat-breed":"f1559","paldea-blaze-breed":"f1560","paldea-aqua-breed":"f1561"},"130":{"mega":"f502"},"142":{"mega":"f585"},"144":{"galar":"f672"},"145":{"galar":"f673"},"146":{"galar":"f674"},"149":{"mega":"f1612"},"150":{"mega-x":"f1636","mega-y":"f1637"},"302":{"mega":"f887"},"303":{"mega":"f888"},"306":{"mega":"f685"}};
 GOF["157"]={"hisui":"f792"};
 GOF["208"]={"mega":"f584"};GOF["211"]={"hisui":"f679"};GOF["212"]={"mega":"f683"};
 GOF["214"]={"mega":"f885"};GOF["215"]={"hisui":"f680"};
 GOF["222"]={"galar":"f826"};
 GOF["227"]={"mega":"f1638"};GOF["229"]={"mega":"f442"};
+GOF["248"]={"mega":"f886"};
+GOF["254"]={"mega":"f691"};
+GOF["257"]={"mega":"f692"};GOF["260"]={"mega":"f693"};
+GOF["263"]={"galar":"f344"};GOF["264"]={"galar":"f346"};
 GOF["181"]={"mega":"f486"};
+GOF["282"]={"mega":"f764"};
 GOF["194"]={"paldea":"f793"};
 GOF["199"]={"galar":"f545"};
 function goiUrl(m){var d=m&&GOI[+m.dex];if(!d)return '';var gf=GOF[+m.dex],img=function(code){return 'https://pokemon.gameinfo.io/img/pokemon/256/p'+(+m.dex)+code+(m.sh==='n'?'':'s1')+'.png';};if(m.fk==='dmax'){m=Object.assign({},m,{fk:'',sp:0});}else if(m.fk){return (gf&&gf[m.fk])?img(gf[m.fk]):'';}else if(m.sp)return '';var c=csGet(m.note||'')||goiGuess(d,m.note),code=d.c[(d.a&&d.a[c])||c]||d.b;return 'https://pokemon.gameinfo.io/img/pokemon/256/p'+(+m.dex)+code+(((m.t||'').indexOf('F')>=0&&d.n.indexOf(code)<0)?'g2':'')+(m.sh==='n'?'':'s1')+'.png';}
