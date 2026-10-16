@@ -381,6 +381,11 @@ nav button[hidden]{display:none}
 #instX{background:transparent;font-size:18px;padding:6px 10px}
 .legend{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
 .tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:14px 8px;margin:14px 0}
+.trow{display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;padding:16px 4px 10px;margin:6px 0 4px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+.trow>.tc{flex:0 0 132px;scroll-snap-align:start}
+.tmi{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:#fff;border:2px solid var(--line);border-radius:12px;padding:6px 10px;margin-bottom:6px}
+.tmi[aria-pressed=true]{border-color:#2F6FE0;background:#EAF2FF;font-weight:800}
+.tmi img{width:40px;height:40px;object-fit:contain}
 .tc{position:relative;background:#fff;border:3px solid var(--line);border-radius:var(--r);padding:14px 6px 8px;text-align:center;display:flex;flex-direction:column;align-items:center}
 .tc.want{border-color:var(--red);background:#FFF5F6}
 .tc.offer{border-color:#2F6FE0;background:#F2F7FF}
@@ -1371,6 +1376,8 @@ var GOI={"25":{"b":"f310","c":{"Assistente do Professor Willow":"f1623","Astrona
 (function(){var N={"303":{"b":"f396","c":{},"n":["f396"],"a":{}},"304":{"b":"f490","c":{},"n":["f490"],"a":{}},"305":{"b":"f491","c":{},"n":["f491"],"a":{}},"306":{"b":"f492","c":{},"n":["f492"],"a":{}},"307":{"b":"f1005","c":{},"n":[],"a":{}},"308":{"b":"f1006","c":{},"n":[],"a":{}}};for(var k in N)GOI[k]=N[k];})();
 /* Pokédex 309–314 (GameInfo) */
 (function(){var N={"309":{"b":"f518","c":{},"n":["f518"],"a":{}},"310":{"b":"f519","c":{},"n":["f519"],"a":{}},"311":{"b":"f1007","c":{},"n":["f1007"],"a":{}},"312":{"b":"f1008","c":{},"n":["f1008"],"a":{}},"313":{"b":"f1009","c":{},"n":["f1009"],"a":{}},"314":{"b":"f1010","c":{},"n":["f1010"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 315–320 (GameInfo) */
+(function(){var N={"315":{"b":"f1011","c":{},"n":[],"a":{}},"316":{"b":"f1012","c":{},"n":[],"a":{}},"317":{"b":"f1013","c":{},"n":[],"a":{}},"318":{"b":"f397","c":{},"n":["f397"],"a":{}},"319":{"b":"f398","c":{},"n":["f398"],"a":{}},"320":{"b":"f1014","c":{},"n":["f1014"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
 function cosFix(dex,c){var g=GOI[+dex];if(!g||!c)return c;c=(g.a&&g.a[c])||c;return g.c[c]?c:'';}
 function goiGuess(d,note){var t=norm(note||'');if(!t)return '';var ns=Object.keys(d.c).sort(function(a,b){return b.length-a.length;});for(var i=0;i<ns.length;i++){if(t.indexOf(norm(ns[i]))>=0)return ns[i];}var k=d.k||{};var ks=Object.keys(k).sort(function(a,b){return b.length-a.length;});for(var j=0;j<ks.length;j++){if(t.indexOf(ks[j])>=0)return k[ks[j]];}return '';}
 /* Formas (GameInfo): GOF[dex][fk]=código da forma. Códigos conferidos nas páginas em pokemon.gameinfo.io/pt-br (miniaturas das formas). Dinamax usa a imagem base. */
@@ -1388,6 +1395,7 @@ GOF["282"]={"mega":"f764"};
 GOF["302"]={"mega":"f887"};
 GOF["303"]={"mega":"f888"};GOF["306"]={"mega":"f685"};GOF["308"]={"mega":"f767"};
 GOF["310"]={"mega":"f503"};
+GOF["319"]={"mega":"f1613"};
 GOF["181"]={"mega":"f486"};
 GOF["282"]={"mega":"f764"};
 GOF["194"]={"paldea":"f793"};
@@ -1940,9 +1948,9 @@ function tProfileDraw(){
   else h+='<button class="btn y" type="button" data-t="dm" data-tu="'+esc(u)+'">💬 Mandar mensagem</button>';
   h+='</div></div>'+tLegend();
   [['want','🔴 Procurando'],['offer','🔵 Oferecendo']].forEach(function(s){
-    var l=T.pi.filter(function(i){return i.kind===s[0];});
-    h+='<div class="bar" style="margin-top:14px"><h2 style="font-size:18px">'+s[1]+' ('+l.length+')</h2>'+(mine?'<button class="btn y s" type="button" data-t="add" data-tk="'+s[0]+'">＋ Adicionar</button>':'')+'</div>'+
-      (l.length?'<div class="tgrid">'+l.map(function(i){return tCard(i,mine);}).join('')+'</div>':'<div class="empty">Nada por aqui.</div>');
+    var l=T.pi.filter(function(i){return i.kind===s[0];}).sort(function(x,y){return (x.dex-y.dex)||String(x.name).localeCompare(String(y.name));});
+    h+='<div class="bar" style="margin-top:14px"><h2 style="font-size:18px">'+s[1]+' ('+l.length+')</h2>'+(mine?'<span style="display:flex;gap:6px"><button class="btn o s" type="button" data-t="addmany" data-tk="'+s[0]+'">☑️ Vários</button><button class="btn y s" type="button" data-t="add" data-tk="'+s[0]+'">＋ Adicionar</button></span>':'')+'</div>'+
+      (l.length?'<div class="trow">'+l.map(function(i){return tCard(i,mine);}).join('')+'</div>':'<div class="empty">Nada por aqui.</div>');
   });
   b.innerHTML=h;tLoadPhotos();
 }
@@ -2048,6 +2056,46 @@ function tMinePick(p){
   tiDraw();
   if(m.ph)photoUrl(m).then(function(u){return u?fetch(u):null;}).then(function(r){return r?r.blob():null;}).then(function(bl){return bl?tCompress(bl,1600,600000):null;}).then(function(d){if(d&&TI){TI.img=d;tiPh();}}).catch(function(){});
 }
+
+/* ---- Adicionar vários de uma vez ---- */
+var TM=null;
+function tAddMany(kind){
+  if(!T.me){tCodeModal();toast('Cadastre seu código de amizade primeiro');return;}
+  TM={kind:kind,sel:{},sh:'y'};
+  var h='<h2>'+(kind==='want'?'🔴 Procuro (vários)':'🔵 Ofereço (vários)')+'</h2><p style="color:#5D6B82;margin:0 0 8px">'+(kind==='want'?'Toque em todos os Pokémon que você procura e depois em Adicionar.':'Toque em todos os Pokémon da sua coleção que quer oferecer e depois em Adicionar.')+'</p>'+
+    '<input class="in" id="tmmq" type="search" placeholder="Buscar nome ou número">'+
+    (kind==='want'?'<label for="tmsh">Brilhante?</label><select class="in" id="tmsh"><option value="y">✨ Shine</option><option value="p">❓ Provável</option><option value="n">Normal</option></select>':'')+
+    '<div id="tmml" style="max-height:46vh;overflow:auto;margin-top:8px"></div>'+
+    '<div class="row" style="margin-top:12px"><button class="btn y" type="button" data-t="tmsave" id="tmsv">Adicionar (0)</button><button class="btn o" id="mNo" type="button">Cancelar</button></div>';
+  $('mdBox').innerHTML=h;$('md').className='modal on';tmList();
+}
+function tmCount(){var n=Object.keys(TM.sel).length,b=$('tmsv');if(b)b.textContent='Adicionar ('+n+')';}
+function tmList(){
+  var q=norm(($('tmmq')||{}).value||'').trim(),box=$('tmml'),out=[],i;
+  TM.map={};
+  if(TM.kind==='want'){
+    for(i=0;i<SP.length&&out.length<150;i++){var s=SP[i];if(!q||norm(s.name).indexOf(q)>=0||String(s.id)===q.replace('#','')){var k='w'+s.id;TM.map[k]={dex:s.id,name:s.name,fk:'',sp:0,t:'',note:''};out.push([k,'<img alt="" src="'+SPR+s.id+'.png"><span>'+esc(s.name)+' <span style="color:#5D6B82;font-size:12px">#'+s.id+'</span></span>']);}}
+  }else{
+    var all=[];
+    AC().forEach(function(a){a.mons.forEach(function(m){if(!q||norm(m.name).indexOf(q)>=0||String(m.dex)===q.replace('#',''))all.push({a:a,m:m});});});
+    all.sort(function(x,y){return x.m.dex-y.m.dex||x.m.name.localeCompare(y.m.name);});
+    mergeMons(all,true).slice(0,150).forEach(function(e){var m=e.m,k='o'+m.id;TM.map[k]={dex:m.dex,name:m.name,fk:m.fk||'',sp:m.sp||0,sh:m.sh,t:m.t||'',note:m.note||''};out.push([k,img(m)+'<span>'+esc(m.name)+' '+badges(m)+(m.q>1?' <b>×'+m.q+'</b>':'')+'</span>']);});
+  }
+  box.innerHTML=out.length?out.map(function(e){return '<button type="button" class="tmi" data-t="tmtog" data-tp="'+e[0]+'" aria-pressed="'+(!!TM.sel[e[0]])+'">'+e[1]+'</button>';}).join(''):'<div class="empty">Nada encontrado.</div>';
+  tmCount();
+}
+function tmSave(){
+  var keys=Object.keys(TM.sel);if(!keys.length){toast('Escolha pelo menos um Pokémon');return;}
+  var sh=($('tmsh')||{}).value||'y',now=new Date().toISOString(),kind=TM.kind,i=0;
+  function chunk(){
+    if(i>=keys.length){$('md').className='modal';toast(keys.length+' adicionados na Janela de Troca');TM=null;if(T.s==='profile'&&T.user===UN)tProfile();return;}
+    var bt=fbDb.batch(),part=keys.slice(i,i+400);i+=400;
+    part.forEach(function(k){var x=TM.sel[k],id=fbDb.collection('tradeItems').doc().id;
+      bt.set(fbDb.collection('tradeItems').doc(id),{owner:UN,kind:kind,dex:x.dex,name:x.name,fk:x.fk||'',sp:x.sp||0,sh:kind==='want'?sh:(x.sh||'y'),t:x.t||'',note:x.note||'',ph:false,createdAt:now});});
+    bt.commit().then(chunk).catch(tErr);
+  }
+  chunk();
+}
 /* ---- Chat (geral e privado) ---- */
 function tComposer(ph){
   return '<div id="tPend"></div><div class="comp"><button type="button" class="btn o" data-t="pickimg" aria-label="Enviar foto">📷</button><textarea class="in" id="tcm" maxlength="400" rows="1" placeholder="'+ph+'"></textarea><button type="button" class="btn y" data-t="send">Enviar</button></div><p class="lg">🚫 Sem palavrões. Imagens com nudez ou conteúdo impróprio = banimento permanente.</p><input type="file" id="tcImg" accept="image/*" hidden>';
@@ -2150,6 +2198,9 @@ document.addEventListener('click',function(e){
   if(a==='codesave'){tCodeSave();return;}
   if(a==='copy'){copyTxt(tCode(tp));return;}
   if(a==='add'){tAdd(el.getAttribute('data-tk'));return;}
+  if(a==='addmany'){tAddMany(el.getAttribute('data-tk'));return;}
+  if(a==='tmtog'){if(TM.sel[tp]){delete TM.sel[tp];el.setAttribute('aria-pressed','false');}else if(TM.map[tp]){TM.sel[tp]=TM.map[tp];el.setAttribute('aria-pressed','true');}tmCount();return;}
+  if(a==='tmsave'){tmSave();return;}
   if(a==='tiflag'){TI.t=TI.t.indexOf(tp)>=0?TI.t.replace(tp,''):TI.t+tp;el.setAttribute('aria-pressed',TI.t.indexOf(tp)>=0?'true':'false');return;}
   if(a==='tisp'){var sid=+tp;TI.dex=sid;TI.name=SPN[sid];TI.fk='';TI.sp=0;TI.cs='';$('tiName').value=TI.name;$('tiSug').innerHTML='';$('tiPick').textContent='✓ '+TI.name+' #'+sid;$('tiForm').innerHTML=tiForms();$('tiCos').innerHTML=cosOpts(TI.dex,'');return;}
   if(a==='tiph'){if(tImgOk())$('tiFile').click();return;}
@@ -2187,6 +2238,7 @@ document.addEventListener('input',function(e){
   var t=e.target;
   if(t.id==='tq'){T.q=t.value;tPlList();}
   else if(t.id==='tmq'){tMineList();}
+  else if(t.id==='tmmq'&&TM){tmList();}
   else if(t.id==='tiName'&&TI){
     TI.dex=0;TI.name='';TI.fk='';TI.cs='';$('tiPick').textContent='';tiSuggest(t.value);
     var q9=norm(t.value).trim(),ex=q9&&SP.filter(function(x){return norm(x.name)===q9;})[0];
