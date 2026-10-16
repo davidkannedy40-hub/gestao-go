@@ -1086,7 +1086,7 @@ function renderHome(){
 }
 
 /* ---------- Conta ---------- */
-var CHIPS=[['all','Todos'],['y','✨ Brilhantes'],['n','Normais'],['p','❓ Prováveis'],['S','🌑 Sombrios'],['L','🍀 Sortudos'],['it','🎩 Com item'],['B','🖼️ Fundo'],['ph','📷 Com foto'],['mega','🧬 Mega'],['gmax','🌋 Gigamax'],['D','🔴 Dinamax'],['reg','🌍 Regionais'],['alt','🔀 Outras formas'],['leg','🦄 Lendários'],['myt','🔮 Místicos'],['crown','👑 Coroados'],['ub','🌀 Ultra Entes'],['par','⚡ Paradoxos']];
+var CHIPS=[['all','Todos'],['y','✨ Brilhantes'],['n','Normais'],['p','❓ Prováveis'],['S','🌑 Sombrios'],['L','🍀 Sortudos'],['it','🎩 Com item'],['B','🖼️ Fundo'],['ph','📷 Com foto'],['mega','🧬 Mega'],['gmax','🌋 Gigamax'],['D','🔴 Dinamax'],['reg','🌍 Regionais'],['alt','🔀 Outras formas'],['leg','🦄 Lendários'],['myt','🔮 Místicos'],['crown','👑 Coroados'],['ub','🌀 Ultra Entes'],['par','⚡ Paradoxos'],['hundo','💯 100%'],['shundo','💯✨ Shundo'],['rep','🔁 Repetidos']];
 var FOP='and';
 function rng(a,b){var r=[];for(var i=a;i<=b;i++)r.push(i);return r;}
 function setOf(l){var o={};l.forEach(function(x){o[x]=1;});return o;}
@@ -1094,7 +1094,12 @@ var DX_LEG=setOf([144,145,146,150,243,244,245,249,250].concat(rng(377,384),[480,
 var DX_MYT=setOf([151,251,385,386,489,490,491,492,493,494,647,648,649,719,720,721,801,802,807,808,809,893,1014,1015,1016,1017,1025]);
 var DX_UB=setOf(rng(793,799).concat(rng(803,806)));
 var DX_PAR=setOf(rng(984,995).concat([1005,1006,1009,1010],rng(1020,1023)));
+var REPK={};
+function repCalc(items,cross){var c={};items.forEach(function(e){var k=dupKey(e.m,cross?null:e.a.id);c[k]=(c[k]||0)+(e.m.q||1);});REPK={};items.forEach(function(e){if(c[dupKey(e.m,cross?null:e.a.id)]>1)REPK[e.m.id]=1;});}
 function oneF(m,f){
+  if(f==='hundo')return (m.t||'').indexOf('I')>=0;
+  if(f==='shundo')return (m.t||'').indexOf('I')>=0&&m.sh==='y';
+  if(f==='rep')return !!REPK[m.id];
   if(f==='leg')return !!DX_LEG[m.dex];
   if(f==='myt')return !!DX_MYT[m.dex];
   if(f==='ub')return !!DX_UB[m.dex];
@@ -1151,17 +1156,19 @@ function dupKey(m,aid){
     /* com fantasia/fundo escolhidos, o texto livre ("jaleco", "cientista"...) não separa os cards */
     n='cs:'+norm(cosFix(m.dex,cs)||cs).trim()+'|bg:'+norm(bg).trim();
   }else{
-    n=(m.note||'').split(' · ').map(function(x){return norm(x).trim();}).filter(Boolean).sort().join('|');
+    n='';
   }
-  return [aid,m.dex,norm(m.name),m.fk||'',m.sp||0,m.sh,(m.t||'').split('').sort().join(''),n].join('~');
+  /* sexo (macho/fêmea) e anotação livre não separam mais os repetidos */
+  return [aid,m.dex,norm(m.name),m.fk||'',m.sp||0,m.sh,(m.t||'').replace(/[FM]/g,'').split('').sort().join(''),n].join('~');
 }
 function mergeMons(list,cross){
   var g={},out=[];
-  list.forEach(function(e){var k=dupKey(e.m,cross?null:e.a.id),o=g[k];if(!o){o=g[k]={a:e.a,m:e.m,q:0,by:{},bo:[]};out.push(o);}var n=(e.m.q||1);o.q+=n;if(!o.by[e.a.id]){o.by[e.a.id]={a:e.a,n:0};o.bo.push(e.a.id);}o.by[e.a.id].n+=n;});
-  return out.map(function(o){var c={};for(var p in o.m)c[p]=o.m[p];c.q=o.q;var r={a:o.a,m:c};if(cross)r.accs=o.bo.map(function(id){return o.by[id];});return r;});
+  list.forEach(function(e){var k=dupKey(e.m,cross?null:e.a.id),o=g[k];if(!o){o=g[k]={a:e.a,m:e.m,q:0,by:{},bo:[]};out.push(o);}var n=(e.m.q||1);o.q+=n;var gt=(e.m.t||'');if(gt.indexOf('F')>=0)o.gf=1;if(gt.indexOf('M')>=0)o.gm=1;if(!o.by[e.a.id]){o.by[e.a.id]={a:e.a,n:0};o.bo.push(e.a.id);}o.by[e.a.id].n+=n;});
+  return out.map(function(o){var c={};for(var p in o.m)c[p]=o.m[p];c.q=o.q;if(o.gf&&o.gm)c.t=(c.t||'').replace(/[FM]/g,'');var r={a:o.a,m:c};if(cross)r.accs=o.bo.map(function(id){return o.by[id];});return r;});
 }
 function drawList(){
   var a=acc(V.acc),q=norm(V.q),box=$('alist'); if(!a||!box)return;
+  repCalc(a.mons.map(function(m){return {a:a,m:m};}),false);
   var list=a.mons.filter(function(m){return passes(m)&&matchQ(m,q);}).sort(function(x,y){return x.dex-y.dex||x.name.localeCompare(y.name);});
   if(V.mode==='sp'){
     var g={},order=[];
@@ -1201,7 +1208,9 @@ function renderAll(){
 }
 function drawAll(){
   var box=$('glist'); if(!box)return;
-  var q=norm(G.q),list=[];
+  var q=norm(G.q),list=[],allI=[];
+  AC().forEach(function(a){if(G.acc==='all'||a.id===G.acc)a.mons.forEach(function(m){allI.push({a:a,m:m});});});
+  repCalc(allI,G.acc==='all');
   AC().forEach(function(a){
     if(G.acc!=='all'&&a.id!==G.acc)return;
     a.mons.forEach(function(m){if(passes(m,G.f)&&matchQ(m,q))list.push({a:a,m:m});});
@@ -1360,6 +1369,8 @@ var GOI={"25":{"b":"f310","c":{"Assistente do Professor Willow":"f1623","Astrona
 (function(){var N={"297":{"b":"f517","c":{},"n":["f517"],"a":{}},"298":{"b":"f1002","c":{},"n":["f1002"],"a":{}},"299":{"b":"f489","c":{},"n":["f489"],"a":{}},"300":{"b":"f1003","c":{},"n":["f1003"],"a":{}},"301":{"b":"f1004","c":{},"n":["f1004"],"a":{}},"302":{"b":"f351","c":{"2020":"f467"},"n":["f351","f467"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
 /* Pokédex 303–308 (GameInfo) */
 (function(){var N={"303":{"b":"f396","c":{},"n":["f396"],"a":{}},"304":{"b":"f490","c":{},"n":["f490"],"a":{}},"305":{"b":"f491","c":{},"n":["f491"],"a":{}},"306":{"b":"f492","c":{},"n":["f492"],"a":{}},"307":{"b":"f1005","c":{},"n":[],"a":{}},"308":{"b":"f1006","c":{},"n":[],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 309–314 (GameInfo) */
+(function(){var N={"309":{"b":"f518","c":{},"n":["f518"],"a":{}},"310":{"b":"f519","c":{},"n":["f519"],"a":{}},"311":{"b":"f1007","c":{},"n":["f1007"],"a":{}},"312":{"b":"f1008","c":{},"n":["f1008"],"a":{}},"313":{"b":"f1009","c":{},"n":["f1009"],"a":{}},"314":{"b":"f1010","c":{},"n":["f1010"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
 function cosFix(dex,c){var g=GOI[+dex];if(!g||!c)return c;c=(g.a&&g.a[c])||c;return g.c[c]?c:'';}
 function goiGuess(d,note){var t=norm(note||'');if(!t)return '';var ns=Object.keys(d.c).sort(function(a,b){return b.length-a.length;});for(var i=0;i<ns.length;i++){if(t.indexOf(norm(ns[i]))>=0)return ns[i];}var k=d.k||{};var ks=Object.keys(k).sort(function(a,b){return b.length-a.length;});for(var j=0;j<ks.length;j++){if(t.indexOf(ks[j])>=0)return k[ks[j]];}return '';}
 /* Formas (GameInfo): GOF[dex][fk]=código da forma. Códigos conferidos nas páginas em pokemon.gameinfo.io/pt-br (miniaturas das formas). Dinamax usa a imagem base. */
@@ -1376,6 +1387,7 @@ GOF["263"]={"galar":"f344"};GOF["264"]={"galar":"f346"};
 GOF["282"]={"mega":"f764"};
 GOF["302"]={"mega":"f887"};
 GOF["303"]={"mega":"f888"};GOF["306"]={"mega":"f685"};GOF["308"]={"mega":"f767"};
+GOF["310"]={"mega":"f503"};
 GOF["181"]={"mega":"f486"};
 GOF["282"]={"mega":"f764"};
 GOF["194"]={"paldea":"f793"};
