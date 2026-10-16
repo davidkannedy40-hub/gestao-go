@@ -1350,6 +1350,16 @@ var GOI={"25":{"b":"f310","c":{"Assistente do Professor Willow":"f1623","Astrona
 (function(){var N={"302":{"b":"f351","c":{"2020":"f467"},"n":["f351","f467"],"a":{}},"303":{"b":"f396","c":{},"n":["f396"],"a":{}},"304":{"b":"f490","c":{},"n":["f490"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
 /* Pokédex 305–307 (GameInfo, conferidos em pokemon.gameinfo.io/pt-br; 307 só o código base, lido na miniatura da página do Aggron) */
 (function(){var N={"305":{"b":"f491","c":{},"n":["f491"],"a":{}},"306":{"b":"f492","c":{},"n":["f492"],"a":{}},"307":{"b":"f1005","c":{},"n":["f1005"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 279–284 (GameInfo) */
+(function(){var N={"279":{"b":"f991","c":{},"n":["f991"],"a":{}},"280":{"b":"f193","c":{},"n":["f193"],"a":{}},"281":{"b":"f196","c":{"Cartola":"f196c116"},"n":["f196","f196c116"],"a":{}},"282":{"b":"f199","c":{"Chapéu inspirado em Meloetta":"f199c117"},"n":["f199","f199c117"],"a":{}},"283":{"b":"f992","c":{},"n":["f992"],"a":{}},"284":{"b":"f993","c":{},"n":["f993"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 285–290 (GameInfo) */
+(function(){var N={"285":{"b":"f994","c":{},"n":["f994"],"a":{}},"286":{"b":"f995","c":{},"n":["f995"],"a":{}},"287":{"b":"f996","c":{"Viseira":"f996c118"},"n":["f996","f996c118"],"a":{}},"288":{"b":"f997","c":{"Viseira":"f997c119"},"n":["f997","f997c119"],"a":{}},"289":{"b":"f998","c":{"Viseira":"f998c120"},"n":["f998","f998c120"],"a":{}},"290":{"b":"f999","c":{},"n":["f999"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 291–296 (GameInfo) */
+(function(){var N={"291":{"b":"f1000","c":{},"n":["f1000"],"a":{}},"292":{"b":"f1001","c":{},"n":["f1001"],"a":{}},"293":{"b":"f598","c":{},"n":["f598"],"a":{}},"294":{"b":"f599","c":{},"n":["f599"],"a":{}},"295":{"b":"f600","c":{},"n":["f600"],"a":{}},"296":{"b":"f516","c":{},"n":["f516"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 297–302 (GameInfo) */
+(function(){var N={"297":{"b":"f517","c":{},"n":["f517"],"a":{}},"298":{"b":"f1002","c":{},"n":["f1002"],"a":{}},"299":{"b":"f489","c":{},"n":["f489"],"a":{}},"300":{"b":"f1003","c":{},"n":["f1003"],"a":{}},"301":{"b":"f1004","c":{},"n":["f1004"],"a":{}},"302":{"b":"f351","c":{"2020":"f467"},"n":["f351","f467"],"a":{}}};for(var k in N)GOI[k]=N[k];})();
+/* Pokédex 303–308 (GameInfo) */
+(function(){var N={"303":{"b":"f396","c":{},"n":["f396"],"a":{}},"304":{"b":"f490","c":{},"n":["f490"],"a":{}},"305":{"b":"f491","c":{},"n":["f491"],"a":{}},"306":{"b":"f492","c":{},"n":["f492"],"a":{}},"307":{"b":"f1005","c":{},"n":[],"a":{}},"308":{"b":"f1006","c":{},"n":[],"a":{}}};for(var k in N)GOI[k]=N[k];})();
 function cosFix(dex,c){var g=GOI[+dex];if(!g||!c)return c;c=(g.a&&g.a[c])||c;return g.c[c]?c:'';}
 function goiGuess(d,note){var t=norm(note||'');if(!t)return '';var ns=Object.keys(d.c).sort(function(a,b){return b.length-a.length;});for(var i=0;i<ns.length;i++){if(t.indexOf(norm(ns[i]))>=0)return ns[i];}var k=d.k||{};var ks=Object.keys(k).sort(function(a,b){return b.length-a.length;});for(var j=0;j<ks.length;j++){if(t.indexOf(ks[j])>=0)return k[ks[j]];}return '';}
 /* Formas (GameInfo): GOF[dex][fk]=código da forma. Códigos conferidos nas páginas em pokemon.gameinfo.io/pt-br (miniaturas das formas). Dinamax usa a imagem base. */
@@ -1363,6 +1373,9 @@ GOF["248"]={"mega":"f886"};
 GOF["254"]={"mega":"f691"};
 GOF["257"]={"mega":"f692"};GOF["260"]={"mega":"f693"};
 GOF["263"]={"galar":"f344"};GOF["264"]={"galar":"f346"};
+GOF["282"]={"mega":"f764"};
+GOF["302"]={"mega":"f887"};
+GOF["303"]={"mega":"f888"};GOF["306"]={"mega":"f685"};GOF["308"]={"mega":"f767"};
 GOF["181"]={"mega":"f486"};
 GOF["282"]={"mega":"f764"};
 GOF["194"]={"paldea":"f793"};
